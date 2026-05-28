@@ -31,8 +31,8 @@ class EmbedderService:
     @property
     def local_sparse_model(self) -> SparseTextEmbedding:
         if self._local_sparse_model is None:
-            logger.info("Initializing local sparse embedding model: prithvida/SPLADE_PP_en_v1")
-            self._local_sparse_model = SparseTextEmbedding(model_name="prithvida/SPLADE_PP_en_v1")
+            logger.info("Initializing local sparse embedding model: prithivida/Splade_PP_en_v1")
+            self._local_sparse_model = SparseTextEmbedding(model_name="prithivida/Splade_PP_en_v1")
         return self._local_sparse_model
 
     def get_dense_embedding(self, text: str) -> List[float]:
