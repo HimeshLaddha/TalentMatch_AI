@@ -11,6 +11,6 @@ class Settings(BaseSettings):
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
     ENVIRONMENT: str = "development"
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=[".env", "backend/.env", "../.env"], extra="ignore")
 
 settings = Settings()

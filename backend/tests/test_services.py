@@ -90,6 +90,11 @@ async def test_job_parser_fallback():
     # Instantiate parser without valid keys (in testing) to verify fallback behavior
     parser = JobParserService()
     
+    # Force clients to None to explicitly test the fallback mechanism
+    parser._groq_client = None
+    parser._openai_client = None
+    parser._gemini_configured = False
+    
     intent = await parser.parse_job_description("MERN stack developer, 3+ years experience, SaaS industry")
     
     # Assert it falls back gracefully to a safe default ParsedJobIntent
