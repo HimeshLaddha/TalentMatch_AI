@@ -84,3 +84,10 @@ venv.bak/
 # FastEmbed and model cache
 .fastembed_cache/
 .cache/
+
+# TalentMatch Storage, metadata and logs
+backend/storage/
+storage/
+metadata.json
+*.log
+logs/
