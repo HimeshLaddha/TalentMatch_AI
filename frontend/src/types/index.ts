@@ -47,7 +47,6 @@ export interface CandidateMatch {
   domain_alignment_score: number;
   final_score: number;
   strongest_alignment: string;
-  strongly_aligned?: string;
   competency_gaps: string;
   tailored_interview_prompts: string[];
 }

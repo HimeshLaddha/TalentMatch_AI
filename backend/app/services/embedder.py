@@ -1,5 +1,5 @@
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from openai import OpenAI
 from fastembed import TextEmbedding, SparseTextEmbedding
 from app.core.config import settings
@@ -14,7 +14,7 @@ class EmbedderService:
         self._local_sparse_model = None
 
     @property
-    def openai_client(self) -> OpenAI:
+    def openai_client(self) -> Optional[OpenAI]:
         if self._openai_client is None:
             api_key = settings.OPENAI_API_KEY
             if api_key:

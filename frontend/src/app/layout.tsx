@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
+import DbRecoveryProvider from "@/components/DbRecoveryProvider";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -29,6 +30,14 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-950 text-slate-100 min-h-screen`}
       >
+        {/*
+          DbRecoveryProvider fires POST /profiles/sync-recovery exactly once
+          per browser session on first mount, healing the in-memory Qdrant
+          vector store from the persisted backend/storage/metadata.json
+          registry regardless of which route the user lands on first.
+        */}
+        <DbRecoveryProvider />
+
         <div className="flex h-screen w-screen overflow-hidden bg-slate-950">
           <Sidebar />
           <main className="flex-1 h-screen overflow-y-auto bg-slate-900/40 relative">
@@ -39,4 +48,3 @@ export default function RootLayout({
     </html>
   );
 }
-

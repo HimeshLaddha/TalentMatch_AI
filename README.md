@@ -8,7 +8,7 @@ TalentMatch AI is a production-grade, high-performance candidate matching and ra
 
 ### 1. Job Intent Extraction (Phase 3)
 - Extracts structured parameters from unstructured job description inputs.
-- Prioritizes **Groq** (`llama-3.3-70b-versatile`), falling back to **OpenAI** (`gpt-4o-mini`) or **Gemini** (`gemini-2.0-flash`).
+- Prioritizes **Groq** (`llama-3.3-70b-versatile`), falling back to **OpenAI** (`gpt-4o-mini`) or **Gemini** (`gemini-2.5-pro`).
 - Recursively expands implicit stack keywords (e.g. MERN stack expansion) to capture auxiliary competencies.
 
 ### 2. Multi-Vector Ingestion Pipeline (Phase 4)

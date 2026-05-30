@@ -1,577 +1,390 @@
 "use client";
 
-import React, { useState } from "react";
-import { ingestCandidateProfile } from "@/lib/api";
-import { CandidateProfile, CareerMilestone } from "@/types";
+import React, { useState, useRef } from "react";
+import { CandidateProfile } from "@/types";
 
 export default function CandidatePortal() {
-  // Candidate profile fields state
-  const [candidateId, setCandidateId] = useState("");
-  const [name, setName] = useState("");
-  const [educationTier, setEducationTier] = useState("Tier_1");
-  const [skillsText, setSkillsText] = useState("");
-  const [domainsText, setDomainsText] = useState("");
-  const [summary, setSummary] = useState("");
-
-  // Platform Signals state
-  const [githubScore, setGithubScore] = useState(50);
-  const [assessmentPassRate, setAssessmentPassRate] = useState(0.75);
-  const [profileCompletion, setProfileCompletion] = useState(85);
-
-  // Career milestones list builder
-  const [milestones, setMilestones] = useState<CareerMilestone[]>([]);
-  // Individual milestone form state
-  const [mTitle, setMTitle] = useState("");
-  const [mCompany, setMCompany] = useState("");
-  const [mDuration, setMDuration] = useState(12);
-  const [mDescription, setMDescription] = useState("");
-
-  // UI state
+  // Drag and drop states
+  const [isDragActive, setIsDragActive] = useState(false);
+  
+  // UI Loading/Error/Success states
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  
+  const [lastParsedProfile, setLastParsedProfile] = useState<CandidateProfile | null>(null);
+
   // Local session history of ingested profiles
   const [sessionIngested, setSessionIngested] = useState<CandidateProfile[]>([]);
 
-  // Helpers
-  const handleGenerateId = () => {
-    // Generate a stable-looking candidate identifier
-    const rand = Math.floor(1000 + Math.random() * 9000);
-    setCandidateId(`CAN-${rand}`);
-  };
+  // Refs
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleAddMilestone = (e: React.MouseEvent) => {
+  // Drag handlers
+  const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
-    if (!mTitle.trim() || !mCompany.trim() || !mDescription.trim()) {
-      alert("Please fill in all milestone fields (Title, Company, and Description).");
-      return;
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setIsDragActive(true);
+    } else if (e.type === "dragleave") {
+      setIsDragActive(false);
     }
-
-    const newMilestone: CareerMilestone = {
-      title: mTitle.trim(),
-      company: mCompany.trim(),
-      duration_months: Number(mDuration),
-      role_description: mDescription.trim(),
-    };
-
-    setMilestones([...milestones, newMilestone]);
-    
-    // Clear milestone input fields
-    setMTitle("");
-    setMCompany("");
-    setMDuration(12);
-    setMDescription("");
   };
 
-  const handleRemoveMilestone = (index: number) => {
-    setMilestones(milestones.filter((_, i) => i !== index));
-  };
-
-  const handleIngest = async (e: React.FormEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(false);
     setError(null);
     setSuccessMessage(null);
+    setLastParsedProfile(null);
 
-    // Validate fields
-    if (!candidateId.trim()) {
-      setError("Candidate ID is required. Use the generate button or enter a unique code.");
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const droppedFile = e.dataTransfer.files[0];
+      validateAndProcessFile(droppedFile);
+    }
+  };
+
+  // Input change handler
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setError(null);
+    setSuccessMessage(null);
+    setLastParsedProfile(null);
+    
+    if (e.target.files && e.target.files[0]) {
+      validateAndProcessFile(e.target.files[0]);
+    }
+  };
+
+  // Check file extension
+  const validateAndProcessFile = (selectedFile: File) => {
+    const filename = selectedFile.name.toLowerCase();
+    
+    // Explicit constraint check for legacy .doc
+    if (filename.endsWith(".doc") && !filename.endsWith(".docx")) {
+      setError("Legacy .doc format is not supported. Please save your file as .docx or .pdf for automatic extraction.");
       return;
     }
-    if (!name.trim()) {
-      setError("Candidate Name is required.");
-      return;
-    }
-    if (!summary.trim()) {
-      setError("Career Summary description is required.");
+
+    if (!(filename.endsWith(".pdf") || filename.endsWith(".docx"))) {
+      setError("Unsupported file format. Please upload a PDF (.pdf) or Word document (.docx).");
       return;
     }
 
-    const techSkills = skillsText
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+    // Auto-upload immediately for frictionless UX
+    uploadFile(selectedFile);
+  };
 
-    const domainExp = domainsText
-      .split(",")
-      .map((d) => d.trim())
-      .filter((d) => d.length > 0);
-
-    if (techSkills.length === 0) {
-      setError("Please provide at least one technical skill.");
-      return;
-    }
-
-    const profilePayload: CandidateProfile = {
-      id: candidateId.trim(),
-      name: name.trim(),
-      anonymized_tier_education: educationTier,
-      domain_experience: domainExp,
-      technical_skills: techSkills,
-      career_summary: summary.trim(),
-      career_history: milestones,
-      platform_signals: {
-        github_contributions_score: githubScore,
-        assessment_pass_rate: assessmentPassRate,
-        profile_completion_pct: profileCompletion,
-      },
-    };
-
+  // Upload file via FormData stream
+  const uploadFile = async (targetFile: File) => {
     setIsLoading(true);
+    setError(null);
+    setSuccessMessage(null);
+    setLastParsedProfile(null);
+
+    const formData = new FormData();
+    formData.append("file", targetFile);
 
     try {
-      await ingestCandidateProfile(profilePayload);
-      setSuccessMessage(`Candidate profile "${name}" successfully indexed into Vector Store (Qdrant).`);
-      setSessionIngested([profilePayload, ...sessionIngested]);
+      const response = await fetch("http://localhost:8000/api/v1/profiles/upload", {
+        method: "POST",
+        body: formData,
+      });
 
-      // Reset main form
-      setCandidateId("");
-      setName("");
-      setSkillsText("");
-      setDomainsText("");
-      setSummary("");
-      setMilestones([]);
-      setGithubScore(50);
-      setAssessmentPassRate(0.75);
-      setProfileCompletion(85);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Upload failed with status code ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Successfully ingested
+      setSuccessMessage(`Resume "${targetFile.name}" successfully parsed and indexed in vector store.`);
+      
+      if (data.profile) {
+        const profile = data.profile as CandidateProfile;
+        setLastParsedProfile(profile);
+        setSessionIngested((prev) => [profile, ...prev]);
+      }
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : "Profile ingestion failed. Please verify API server and Qdrant backend status.";
+      const errMsg = err instanceof Error ? err.message : "Failed to process resume upload. Please verify API server is online.";
       setError(errMsg);
     } finally {
       setIsLoading(false);
     }
   };
 
+  const triggerFileSelect = () => {
+    fileInputRef.current?.click();
+  };
+
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-8 animate-fade-in">
       {/* Header */}
-      <div className="border-b border-slate-800 pb-6">
-        <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-          Candidate Ingestion Portal
-        </h1>
-        <p className="text-slate-400 text-sm mt-1">
-          Index new candidate resumes, project work milestones, and programmatic scoring signals directly into the dual-space vector indexes.
-        </p>
+      <div className="border-b border-slate-800 pb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+            Candidate Ingestion Portal
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Upload raw resume files (.pdf or .docx) to automatically parse credentials and generate dual-space vector indexes.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-400 font-mono">
+          <span className="h-2.5 w-2.5 rounded-full bg-indigo-500 animate-pulse"></span>
+          LLM Parsing Pipeline Ready
+        </div>
       </div>
 
-      {/* Main Grid: Form on Left, Milestones & session log on Right */}
+      {/* Main Grid: Upload zone on Left, extracted preview or session history on Right */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
-        {/* Left Side: General Profile Form & Sliders */}
-        <form onSubmit={handleIngest} className="lg:col-span-7 space-y-6">
-          
-          {/* Form State Alerts */}
+        {/* Left Column: Drag and Drop Zone */}
+        <div className="lg:col-span-6 space-y-6">
+          <div className="bg-slate-950/50 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-md space-y-4">
+            <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+              <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+              Resume Upload Zone
+            </h2>
+
+            {/* Drag & Drop Card container */}
+            <div
+              onDragEnter={handleDrag}
+              onDragOver={handleDrag}
+              onDragLeave={handleDrag}
+              onDrop={handleDrop}
+              onClick={triggerFileSelect}
+              className={`h-72 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center text-center p-6 cursor-pointer transition-all duration-300 ${
+                isDragActive
+                  ? "border-indigo-500 bg-indigo-500/5 shadow-indigo-500/10 shadow-lg"
+                  : "border-slate-800 bg-slate-900/10 hover:bg-slate-900/25 hover:border-slate-700/80"
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept=".pdf,.docx,.doc"
+                onChange={handleFileChange}
+              />
+              
+              <div className="w-14 h-14 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mb-4 text-slate-400 shadow-md group-hover:scale-105 transition-transform duration-300">
+                <svg className="w-7 h-7 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+
+              <h3 className="font-semibold text-slate-200 text-sm">
+                Drag and drop resume here
+              </h3>
+              <p className="text-slate-500 text-xs mt-1.5 max-w-xs">
+                Supports PDF (.pdf) and Microsoft Word (.docx) files. Click to browse files from explorer.
+              </p>
+            </div>
+          </div>
+
+          {/* Feedback alerts container */}
           {error && (
-            <div className="bg-rose-950/20 border border-rose-500/30 rounded-xl p-4 flex items-start gap-3 text-rose-300 text-sm">
+            <div className="bg-rose-950/20 border border-rose-500/30 rounded-xl p-4 flex items-start gap-3 text-rose-300 text-sm animate-fade-in">
               <svg className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <div><span className="font-bold">Error:</span> {error}</div>
+              <div>
+                <span className="font-bold">Ingestion Blocked:</span> {error}
+              </div>
             </div>
           )}
 
           {successMessage && (
-            <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl p-4 flex items-start gap-3 text-emerald-300 text-sm">
+            <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl p-4 flex items-start gap-3 text-emerald-300 text-sm animate-fade-in">
               <svg className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <div><span className="font-bold">Success:</span> {successMessage}</div>
+              <div>
+                <span className="font-bold">Ingestion Success:</span> {successMessage}
+              </div>
             </div>
           )}
 
-          {/* Profile Core Data Card */}
-          <div className="bg-slate-950/50 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-md space-y-4">
-            <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2 mb-2">
-              <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              Candidate Profile Setup
-            </h2>
-
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Candidate ID
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={candidateId}
-                    onChange={(e) => setCandidateId(e.target.value)}
-                    placeholder="e.g. CAN-0245"
-                    className="flex-1 bg-slate-900/60 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors font-mono"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={handleGenerateId}
-                    className="bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl px-3 text-xs font-semibold text-slate-300 transition-colors shrink-0"
-                  >
-                    Auto Gen
-                  </button>
-                </div>
+          {/* Glowing pulse loading banner */}
+          {isLoading && (
+            <div className="bg-indigo-950/20 border border-indigo-500/30 rounded-xl p-6 shadow-indigo-500/5 shadow-md flex items-center gap-4 animate-pulse">
+              <div className="relative shrink-0 flex h-6 w-6">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-6 w-6 bg-indigo-500 flex items-center justify-center text-[10px] text-white font-bold font-mono">AI</span>
               </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                  Candidate Name
-                </label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. John Doe"
-                  className="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors"
-                  required
-                />
+              <div className="space-y-1">
+                <h4 className="text-sm font-semibold text-indigo-300">Extracting Profile</h4>
+                <p className="text-xs text-slate-400">
+                  AI is analyzing resume layout and generating vector slots... Please wait.
+                </p>
               </div>
             </div>
+          )}
+        </div>
 
+        {/* Right Column: AI Extraction Insights Preview */}
+        <div className="lg:col-span-6 space-y-6">
+          <div className="bg-slate-950/50 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-md min-h-[352px] flex flex-col justify-between">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                Education Ranking Tier
-              </label>
-              <select
-                value={educationTier}
-                onChange={(e) => setEducationTier(e.target.value)}
-                className="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors"
-              >
-                <option value="Tier_1">Tier 1 - Ivy League / Top National Technical Institutions</option>
-                <option value="Tier_2">Tier 2 - Ranked Regional / Highly Competitive Institutions</option>
-                <option value="Tier_3">Tier 3 - Standard / General Accredited Education</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                Technical Skills (Comma Separated)
-              </label>
-              <input
-                type="text"
-                value={skillsText}
-                onChange={(e) => setSkillsText(e.target.value)}
-                placeholder="React, Next.js, Node.js, Python, TypeScript, Docker"
-                className="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors"
-                required
-              />
-              {skillsText && (
-                <div className="flex flex-wrap gap-1.5 mt-2 bg-slate-900/20 p-2 border border-slate-800/40 rounded-lg">
-                  {skillsText.split(",").map((s, i) => {
-                    const skill = s.trim();
-                    if (!skill) return null;
-                    return (
-                      <span key={i} className="text-xs bg-indigo-500/10 text-indigo-300 px-2 py-0.5 border border-indigo-500/20 rounded-md">
-                        {skill}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                Domain Verticals (Comma Separated)
-              </label>
-              <input
-                type="text"
-                value={domainsText}
-                onChange={(e) => setDomainsText(e.target.value)}
-                placeholder="FinTech, SaaS, Healthcare, E-Commerce"
-                className="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors"
-              />
-              {domainsText && (
-                <div className="flex flex-wrap gap-1.5 mt-2 bg-slate-900/20 p-2 border border-slate-800/40 rounded-lg">
-                  {domainsText.split(",").map((d, i) => {
-                    const dom = d.trim();
-                    if (!dom) return null;
-                    return (
-                      <span key={i} className="text-xs bg-sky-500/10 text-sky-300 px-2 py-0.5 border border-sky-500/20 rounded-md">
-                        {dom}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                Career Summary
-              </label>
-              <textarea
-                rows={4}
-                value={summary}
-                onChange={(e) => setSummary(e.target.value)}
-                placeholder="Summary profile narrative outlining focus areas, technologies, and career trajectory..."
-                className="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors resize-none leading-relaxed"
-                required
-              />
-            </div>
-          </div>
-
-          {/* Platform Signals Numerical Metrics Card */}
-          <div className="bg-slate-950/50 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-md space-y-6">
-            <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-              <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              Platform Scoring & Signals
-            </h2>
-
-            {/* Slider 1: GitHub activity index */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  GitHub Contributions Index
-                </span>
-                <span className="text-sm font-mono font-bold text-indigo-400">{githubScore} / 100</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={githubScore}
-                onChange={(e) => setGithubScore(Number(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500 focus:outline-none"
-              />
-              <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                <span>0 (Inactive)</span>
-                <span>50 (Moderate)</span>
-                <span>100 (Hyperactive)</span>
-              </div>
-            </div>
-
-            {/* Slider 2: Assessment Pass rate */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Programmatic Evaluation Pass Rate
-                </span>
-                <span className="text-sm font-mono font-bold text-indigo-400">
-                  {Math.round(assessmentPassRate * 100)}%
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0.0"
-                max="1.0"
-                step="0.01"
-                value={assessmentPassRate}
-                onChange={(e) => setAssessmentPassRate(Number(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500 focus:outline-none"
-              />
-              <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                <span>0.0 (No passes)</span>
-                <span>0.5 (Average)</span>
-                <span>1.0 (Flawless)</span>
-              </div>
-            </div>
-
-            {/* Slider 3: Profile Completion pct */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Profile Completeness Pct
-                </span>
-                <span className="text-sm font-mono font-bold text-indigo-400">{profileCompletion}%</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={profileCompletion}
-                onChange={(e) => setProfileCompletion(Number(e.target.value))}
-                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500 focus:outline-none"
-              />
-              <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                <span>0%</span>
-                <span>50%</span>
-                <span>100% (Fully populated)</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Submit Action Block */}
-          <button
-            type="submit"
-            disabled={isLoading}
-            className={`w-full flex items-center justify-center gap-2 rounded-xl py-3.5 px-4 font-semibold text-sm transition-all duration-300 shadow-lg ${
-              isLoading
-                ? "bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700/50"
-                : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/25 hover:shadow-indigo-500/35 border border-indigo-500/30 hover:scale-[1.01]"
-            }`}
-          >
-            {isLoading ? (
-              <>
-                <svg className="animate-spin h-5 w-5 text-indigo-400" fill="none" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2 mb-4 border-b border-slate-800/60 pb-3">
+                <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                 </svg>
-                Upserting Vector Indexes...
-              </>
-            ) : (
-              <>
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                </svg>
-                Submit Candidate Profile
-              </>
-            )}
-          </button>
-        </form>
+                AI Extraction Preview
+              </h2>
 
-        {/* Right Side: Career Milestone Builder & Session Index Log */}
-        <div className="lg:col-span-5 space-y-6">
-          
-          {/* Milestone Builder Section */}
-          <div className="bg-slate-950/50 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-md space-y-4">
-            <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-              <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-              Career Milestone Builder
-            </h2>
-
-            {/* Sub-form */}
-            <div className="space-y-4 p-4 border border-slate-800 bg-slate-900/20 rounded-xl">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
-                    Role Title
-                  </label>
-                  <input
-                    type="text"
-                    value={mTitle}
-                    onChange={(e) => setMTitle(e.target.value)}
-                    placeholder="e.g. Senior Frontend Dev"
-                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
-                    Company Name
-                  </label>
-                  <input
-                    type="text"
-                    value={mCompany}
-                    onChange={(e) => setMCompany(e.target.value)}
-                    placeholder="e.g. Stripe"
-                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
-                  Duration (Months)
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  value={mDuration}
-                  onChange={(e) => setMDuration(Number(e.target.value))}
-                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
-                  Responsibilities & Accomplishments
-                </label>
-                <textarea
-                  rows={3}
-                  value={mDescription}
-                  onChange={(e) => setMDescription(e.target.value)}
-                  placeholder="Developed internal tooling in Next.js. Refactored state handling..."
-                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
-                />
-              </div>
-
-              <button
-                type="button"
-                onClick={handleAddMilestone}
-                className="w-full bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-lg py-1.5 text-xs font-semibold transition-colors"
-              >
-                + Add Milestone to History
-              </button>
-            </div>
-
-            {/* List of Milestones */}
-            <div className="space-y-2 mt-4">
-              <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Milestones ({milestones.length})
-              </span>
-              
-              {milestones.length === 0 ? (
-                <div className="text-center p-4 border border-dashed border-slate-800/80 rounded-xl text-slate-600 text-xs italic">
-                  No professional history milestones added. Add milestones using the builder above.
+              {!lastParsedProfile ? (
+                <div className="h-56 flex flex-col items-center justify-center text-center p-6 border border-dashed border-slate-800 rounded-xl text-slate-600 text-xs italic bg-slate-900/10">
+                  Drop a PDF or DOCX file on the left. The AI parsing pipeline will automatically extract credentials and show a preview of the structured metadata here.
                 </div>
               ) : (
-                <div className="space-y-3 max-h-60 overflow-y-auto scrollbar-thin pr-1">
-                  {milestones.map((milestone, idx) => (
-                    <div key={idx} className="bg-slate-900/60 border border-slate-850 rounded-xl p-3 flex gap-3 items-start justify-between group relative">
-                      <div className="space-y-1">
-                        <div className="font-semibold text-xs text-slate-200">
-                          {milestone.title}
-                        </div>
-                        <div className="text-[11px] text-slate-400 font-medium">
-                          {milestone.company} &bull; <span className="font-mono text-indigo-400">{milestone.duration_months} mo</span>
-                        </div>
-                        <div className="text-[11px] text-slate-500 leading-relaxed max-w-sm line-clamp-2">
-                          {milestone.role_description}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveMilestone(idx)}
-                        className="text-rose-500 hover:text-rose-400 hover:bg-rose-950/20 p-1.5 rounded-lg border border-transparent hover:border-rose-900/30 transition-colors shrink-0"
-                        title="Remove milestone"
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
+                <div className="space-y-4 text-xs animate-fade-in">
+                  {/* General Profile Row */}
+                  <div className="grid grid-cols-2 gap-4 bg-slate-900/40 p-3.5 border border-slate-800/80 rounded-xl">
+                    <div>
+                      <span className="text-slate-500 block uppercase tracking-wider text-[9px] font-semibold">Candidate ID</span>
+                      <span className="font-mono text-slate-200 font-bold">{lastParsedProfile.id}</span>
                     </div>
-                  ))}
+                    <div>
+                      <span className="text-slate-500 block uppercase tracking-wider text-[9px] font-semibold">Candidate Name</span>
+                      <span className="text-slate-200 font-bold">{lastParsedProfile.name}</span>
+                    </div>
+                  </div>
+
+                  {/* Education and Verticals */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-slate-500 block uppercase tracking-wider text-[9px] font-semibold mb-1">Education Rating</span>
+                      <span className="inline-block bg-slate-900 border border-slate-850 px-2.5 py-1 rounded text-slate-300 font-semibold font-mono">
+                        {lastParsedProfile.anonymized_tier_education.replace("_", " ")}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block uppercase tracking-wider text-[9px] font-semibold mb-1">Extracted Domain</span>
+                      <div className="flex flex-wrap gap-1">
+                        {lastParsedProfile.domain_experience.slice(0, 3).map((d, i) => (
+                          <span key={i} className="bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2 py-0.5 rounded text-[10px]">
+                            {d}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Skills tags */}
+                  <div>
+                    <span className="text-slate-500 block uppercase tracking-wider text-[9px] font-semibold mb-1.5">Extracted Stack / Skills ({lastParsedProfile.technical_skills.length})</span>
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+                      {lastParsedProfile.technical_skills.map((s, i) => (
+                        <span key={i} className="bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 px-2 py-0.5 rounded text-[10px]">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Inferred platform activity signals */}
+                  <div className="bg-slate-900/30 p-3 border border-slate-800/80 rounded-xl space-y-2">
+                    <span className="text-slate-400 block uppercase tracking-wider text-[9px] font-bold">
+                      Inferred Platform Activity Signals
+                    </span>
+                    <div className="grid grid-cols-3 gap-3 text-center text-[10px]">
+                      <div className="bg-slate-900 p-2 border border-slate-850 rounded-lg">
+                        <span className="text-slate-500 block text-[9px]">GitHub Contributions</span>
+                        <span className="font-mono text-indigo-400 font-extrabold">{lastParsedProfile.platform_signals.github_contributions_score} / 100</span>
+                      </div>
+                      <div className="bg-slate-900 p-2 border border-slate-850 rounded-lg">
+                        <span className="text-slate-500 block text-[9px]">Evaluation Pass</span>
+                        <span className="font-mono text-indigo-400 font-extrabold">{Math.round(lastParsedProfile.platform_signals.assessment_pass_rate * 100)}%</span>
+                      </div>
+                      <div className="bg-slate-900 p-2 border border-slate-850 rounded-lg">
+                        <span className="text-slate-500 block text-[9px]">Profile Completeness</span>
+                        <span className="font-mono text-indigo-400 font-extrabold">{lastParsedProfile.platform_signals.profile_completion_pct}%</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
-          </div>
-
-          {/* Session Log Card */}
-          <div className="bg-slate-950/50 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-md">
-            <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2 mb-4">
-              <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-              Session Ingestion History
-            </h2>
-
-            {sessionIngested.length === 0 ? (
-              <div className="border border-dashed border-slate-800 rounded-xl p-6 text-center text-slate-600 text-xs italic bg-slate-900/10">
-                No candidate profiles index queries submitted in this session.
-              </div>
-            ) : (
-              <div className="space-y-2.5 max-h-56 overflow-y-auto scrollbar-thin">
-                {sessionIngested.map((profile, i) => (
-                  <div key={i} className="flex items-center justify-between p-3 bg-slate-900/40 border border-slate-800/80 rounded-xl text-xs animate-fade-in">
-                    <div>
-                      <div className="font-semibold text-slate-200">{profile.name}</div>
-                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">{profile.id}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-[10px] font-mono text-emerald-400 font-bold bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full uppercase">
-                        Indexed
-                      </div>
-                      <div className="text-[9px] text-slate-500 mt-1 font-mono">{profile.technical_skills.length} skills</div>
-                    </div>
-                  </div>
-                ))}
+            
+            {/* Download/Vector ID Indicator */}
+            {lastParsedProfile && (
+              <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                <span>Ingested Vector Record</span>
+                <span className="text-slate-400 font-bold select-all">Qdrant point generated</span>
               </div>
             )}
           </div>
         </div>
+      </div>
+
+      {/* Session Ingestion Log - full width at the bottom */}
+      <div className="bg-slate-950/50 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-md">
+        <div className="flex items-center justify-between mb-4 border-b border-slate-800/60 pb-3">
+          <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+            <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            Session Ingested Profiles Log
+          </h2>
+          <span className="text-xs text-slate-500 font-mono">
+            {sessionIngested.length} profiles index queries submitted
+          </span>
+        </div>
+
+        {sessionIngested.length === 0 ? (
+          <div className="border border-dashed border-slate-800 rounded-xl p-8 text-center text-slate-600 text-xs italic bg-slate-900/10">
+            No candidate profiles uploaded in this browser session. Drop a file above to add candidates.
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/10">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-800 font-semibold uppercase tracking-wider text-slate-500 bg-slate-900/30">
+                  <th className="py-3 px-4">Candidate ID</th>
+                  <th className="py-3 px-4">Name</th>
+                  <th className="py-3 px-4">Education Rating</th>
+                  <th className="py-3 px-4">Technical Stack</th>
+                  <th className="py-3 px-4 text-center">GitHub score</th>
+                  <th className="py-3 px-4 text-center">Evaluation Pass</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/50">
+                {sessionIngested.map((profile) => (
+                  <tr key={profile.id} className="hover:bg-slate-900/20 transition-colors animate-fade-in">
+                    <td className="py-3.5 px-4 font-mono font-bold text-indigo-400">{profile.id}</td>
+                    <td className="py-3.5 px-4 text-slate-200 font-semibold">{profile.name}</td>
+                    <td className="py-3.5 px-4">
+                      <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400 font-mono">
+                        {profile.anonymized_tier_education}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-4">
+                      <div className="flex flex-wrap gap-1 max-w-sm">
+                        {profile.technical_skills.slice(0, 5).map((skill, i) => (
+                          <span key={i} className="bg-indigo-500/5 text-indigo-300/80 px-1.5 py-0.5 rounded text-[10px]">
+                            {skill}
+                          </span>
+                        ))}
+                        {profile.technical_skills.length > 5 && (
+                          <span className="text-[10px] text-slate-500 pl-1 font-mono">+{profile.technical_skills.length - 5} more</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3.5 px-4 text-center font-mono text-slate-300">
+                      {profile.platform_signals.github_contributions_score}
+                    </td>
+                    <td className="py-3.5 px-4 text-center font-mono text-slate-300">
+                      {Math.round(profile.platform_signals.assessment_pass_rate * 100)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
