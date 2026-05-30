@@ -1,6 +1,8 @@
 import json
 import logging
 from pathlib import Path
+import uuid
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import JSONResponse
 import io
@@ -19,10 +21,8 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Storage path resolution
 # ---------------------------------------------------------------------------
-# Resolves to:  <repo_root>/backend/storage/metadata.json
-#   __file__  = .../backend/app/api/v1/endpoints/profiles.py  (5 levels up → repo root)
-_BACKEND_DIR = Path(__file__).resolve().parents[4]  # TalentMatch_AI/backend
-_STORAGE_DIR = _BACKEND_DIR / "storage"
+# Resolves to: ~/.talentmatch_storage
+_STORAGE_DIR = Path.home() / ".talentmatch_storage"
 _METADATA_FILE = _STORAGE_DIR / "metadata.json"
 
 
@@ -50,6 +50,35 @@ async def upload_profile(
     Returns HTTP 201 with the assigned Qdrant UUID on success.
     Raises HTTP 500 on any vectorisation or storage failure.
     """
+    try:
+        # Update metadata.json registry
+        metadata = {}
+        if _METADATA_FILE.exists():
+            try:
+                with _METADATA_FILE.open("r", encoding="utf-8") as fh:
+                    metadata = json.load(fh)
+                    if not isinstance(metadata, dict):
+                        metadata = {}
+            except Exception as exc:
+                logger.warning(f"Could not read metadata.json: {exc}")
+                metadata = {}
+
+        # Add profile to metadata dictionary
+        profile_data = profile.model_dump()
+        profile_data["stored_at"] = datetime.now(timezone.utc).isoformat()
+        profile_data["profile_path"] = None  # No file uploaded
+        metadata[profile.id] = profile_data
+
+        _STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+        with _METADATA_FILE.open("w", encoding="utf-8") as fh:
+            json.dump(metadata, fh, indent=4)
+    except Exception as e:
+        logger.error(f"Failed to persist metadata for candidate '{profile.id}': {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to persist candidate profile metadata: {str(e)}",
+        )
+
     try:
         qdrant_id = await vector_store.upsert_candidate(profile, embedder)
         logger.info(
@@ -315,6 +344,43 @@ async def upload_resume_file(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Failed to extract structured data from resume: {str(e)}",
+        )
+
+    try:
+        # Anonymize filename and save to disk
+        file_ext = Path(filename).suffix
+        anonymized_filename = f"{uuid.uuid4()}{file_ext}"
+        resumes_dir = _STORAGE_DIR / "resumes"
+        resumes_dir.mkdir(parents=True, exist_ok=True)
+        saved_file_path = resumes_dir / anonymized_filename
+        with open(saved_file_path, "wb") as f:
+            f.write(contents)
+
+        # Update metadata.json registry
+        metadata = {}
+        if _METADATA_FILE.exists():
+            try:
+                with _METADATA_FILE.open("r", encoding="utf-8") as fh:
+                    metadata = json.load(fh)
+                    if not isinstance(metadata, dict):
+                        metadata = {}
+            except Exception as exc:
+                logger.warning(f"Could not read metadata.json: {exc}")
+                metadata = {}
+
+        # Add profile to metadata dictionary
+        profile_data = profile.model_dump()
+        profile_data["stored_at"] = datetime.now(timezone.utc).isoformat()
+        profile_data["profile_path"] = str(saved_file_path)
+        metadata[profile.id] = profile_data
+
+        with _METADATA_FILE.open("w", encoding="utf-8") as fh:
+            json.dump(metadata, fh, indent=4)
+    except Exception as e:
+        logger.error(f"Failed to persist file or metadata for candidate '{profile.id}': {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to persist candidate profile files: {str(e)}",
         )
 
     try:
