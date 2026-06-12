@@ -41,7 +41,8 @@ _mongo_client: AsyncIOMotorClient | None = None
 def get_mongo_db():
     global _mongo_client
     if _mongo_client is None:
-        _mongo_client = AsyncIOMotorClient(settings.MONGODB_URI)
+        uri = settings.MONGO_URI or settings.MONGODB_URI
+        _mongo_client = AsyncIOMotorClient(uri)
     return _mongo_client["talentmatch"]
 
 
@@ -158,28 +159,11 @@ async def upload_profile(
             upsert=True
         )
         logger.info(f"Structured JSON profile saved in MongoDB Atlas for candidate '{profile.id}'")
-
-        # Also write to local metadata.json registry for compatibility
-        metadata = {}
-        if _METADATA_FILE.exists():
-            try:
-                with _METADATA_FILE.open("r", encoding="utf-8") as fh:
-                    metadata = json.load(fh)
-                    if not isinstance(metadata, dict):
-                        metadata = {}
-            except Exception as exc:
-                logger.warning(f"Could not read metadata.json: {exc}")
-                metadata = {}
-
-        metadata[profile.id] = profile_data
-        _STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-        with _METADATA_FILE.open("w", encoding="utf-8") as fh:
-            json.dump(metadata, fh, indent=4)
     except Exception as e:
-        logger.error(f"Failed to persist metadata in MongoDB/disk for candidate '{profile.id}': {e}")
+        logger.error(f"Failed to persist metadata in MongoDB for candidate '{profile.id}': {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to persist candidate profile metadata: {str(e)}",
+            detail=f"Failed to persist candidate profile metadata in database: {str(e)}",
         )
 
     try:
@@ -469,21 +453,12 @@ async def upload_resume_file(
             detail=f"Failed to extract structured data from resume: {str(e)}",
         )
 
-    # 5. Save structured JSON profile to disk & MongoDB Atlas
+    # 5. Save structured JSON profile to MongoDB Atlas
     try:
-        # Anonymize filename and save to local disk
-        file_ext = Path(filename).suffix
-        anonymized_filename = f"{uuid.uuid4()}{file_ext}"
-        resumes_dir = _STORAGE_DIR / "resumes"
-        resumes_dir.mkdir(parents=True, exist_ok=True)
-        saved_file_path = resumes_dir / anonymized_filename
-        with open(saved_file_path, "wb") as f:
-            f.write(contents)
-
         # Update MongoDB Atlas profiles collection
         profile_data = profile.model_dump()
         profile_data["stored_at"] = datetime.now(timezone.utc).isoformat()
-        profile_data["profile_path"] = str(saved_file_path)
+        profile_data["profile_path"] = filename  # Use the uploaded filename as a reference
         profile_data["md5_hash"] = md5_hash
 
         await db.profiles.update_one(
@@ -492,27 +467,11 @@ async def upload_resume_file(
             upsert=True
         )
         logger.info(f"Saved structured JSON candidate profile in MongoDB Atlas for candidate '{profile.id}'")
-
-        # Update metadata.json registry for fallback compatibility
-        metadata = {}
-        if _METADATA_FILE.exists():
-            try:
-                with _METADATA_FILE.open("r", encoding="utf-8") as fh:
-                    metadata = json.load(fh)
-                    if not isinstance(metadata, dict):
-                        metadata = {}
-            except Exception as exc:
-                logger.warning(f"Could not read metadata.json: {exc}")
-                metadata = {}
-
-        metadata[profile.id] = profile_data
-        with _METADATA_FILE.open("w", encoding="utf-8") as fh:
-            json.dump(metadata, fh, indent=4)
     except Exception as e:
-        logger.error(f"Failed to persist file or metadata for candidate '{profile.id}': {e}")
+        logger.error(f"Failed to persist candidate profile in MongoDB for candidate '{profile.id}': {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to persist candidate profile files: {str(e)}",
+            detail=f"Failed to save candidate profile to MongoDB Atlas database: {str(e)}",
         )
 
     # 6. Push variables to the cache memory dict
