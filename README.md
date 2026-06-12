@@ -69,9 +69,38 @@ QDRANT_HOST=localhost
 QDRANT_PORT=6333
 ```
 
+
+## 🏆 Hackathon Challenge Pipeline
+
+To run the automated candidate discovery, extraction, caching, and ranking pipeline for the India runs challenge job description:
+
+### 1. Execute the Pipeline Ingestion & Migration Harness
+The pipeline harness reads the target JD and candidate documents from the challenge folder, checks MD5 caching, archives raw and structured data to MongoDB Atlas, indexes candidate vectors in Qdrant, searches using client-side Reciprocal Rank Fusion (RRF, k=60), and scores the shortlist using the deep reranker.
+
+Run the pipeline using the following command (defaults to the 50 candidate sample):
+```bash
+# On Windows (PowerShell)
+$env:PYTHONPATH="backend"; .venv\Scripts\python backend/extract_challenge.py
+
+# On macOS/Linux
+PYTHONPATH=backend .venv/bin/python backend/extract_challenge.py
+```
+
+Options:
+- `--file <path>`: Path to candidate JSON/JSONL pool (e.g. `India_runs_data_and_ai_challenge/candidates.jsonl`).
+- `--limit <int>`: Cap the number of processed profiles (default `100`) to manage cloud rate limits and compute budget.
+- `--qdrant-local`: Force connection to local Qdrant server at `localhost:6333` instead of in-memory collection.
+
+### 2. View Compiled Outcomes
+After execution, the compiled report is written to:
+- [India_runs_final_leaderboard.md](file:///c:/Users/Admin/OneDrive/Desktop/TalentMatch_AI/India_runs_data_and_ai_challenge/India_runs_final_leaderboard.md)
+
+This file contains the final ranked candidate leaderboard table with individual sub-scores and edge-case behavior summaries, alongside detailed Explainable AI (XAI) fit profiles for the top 3 ranked candidates.
+
 ---
 
 ## 🧪 Testing and Validation
+
 
 ### 1. Standalone Integration Script (`run_pipeline_check.py`)
 Run the unified validation script to verify the entire pipeline end-to-end with zero configurations (it will use in-memory fallbacks out-of-the-box):
