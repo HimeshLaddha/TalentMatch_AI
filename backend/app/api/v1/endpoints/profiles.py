@@ -2,18 +2,23 @@ import json
 import logging
 from pathlib import Path
 import uuid
+import hashlib
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Header
 from fastapi.responses import JSONResponse
 import io
 import docx
 from pypdf import PdfReader
+import jwt
+from pydantic import BaseModel
+from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.schemas.candidate import CandidateProfile
 from app.services.embedder import EmbedderService
 from app.services.vector_store import VectorStoreService
 from app.services.parser import JobParserService
 from app.api.deps import get_embedder_service, get_vector_store_service, get_job_parser_service
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -25,7 +30,107 @@ router = APIRouter()
 _STORAGE_DIR = Path.home() / ".talentmatch_storage"
 _METADATA_FILE = _STORAGE_DIR / "metadata.json"
 
+# ---------------------------------------------------------------------------
+# Cache & Database Connections
+# ---------------------------------------------------------------------------
+# Application-level memory cache dict mapping file MD5 checksum strings to parsed JSON documents
+RESUME_EXTRACTION_CACHE: dict[str, dict] = {}
 
+_mongo_client: AsyncIOMotorClient | None = None
+
+def get_mongo_db():
+    global _mongo_client
+    if _mongo_client is None:
+        uri = settings.MONGO_URI or settings.MONGODB_URI
+        _mongo_client = AsyncIOMotorClient(uri)
+    return _mongo_client["talentmatch"]
+
+
+# ---------------------------------------------------------------------------
+# Security & JWT Token Verification Dependency
+# ---------------------------------------------------------------------------
+async def verify_admin_token(authorization: str = Header(None)) -> dict:
+    """
+    Decrypts a signed JWT string from the Authorization header.
+    Rejects requests with HTTP 401 if tokens are missing or fail role-based verification.
+    """
+    if not authorization:
+        logger.error("Authentication failed: Missing Authorization header")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization Header",
+        )
+    
+    if not authorization.startswith("Bearer "):
+        logger.error("Authentication failed: Token is not in Bearer format")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token format. Must be Bearer <token>",
+        )
+    
+    token = authorization.split(" ")[1]
+    try:
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM]
+        )
+    except jwt.ExpiredSignatureError as exc:
+        logger.error(f"Authentication failed: Token has expired - {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+        )
+    except jwt.InvalidTokenError as exc:
+        logger.error(f"Authentication failed: Invalid token - {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+        )
+    
+    role = payload.get("role")
+    if role != "admin":
+        logger.error(f"Authentication failed: Access forbidden for role '{role}'")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Access forbidden: Admin role required",
+        )
+    
+    return payload
+
+
+# ---------------------------------------------------------------------------
+# Login Schema & Endpoint
+# ---------------------------------------------------------------------------
+class LoginRequest(BaseModel):
+    password: str
+
+@router.post(
+    "/login",
+    summary="Authenticate admin credentials and yield a signed JWT token",
+)
+async def login_admin(payload: LoginRequest):
+    """
+    Validates the administrative password and returns a signed JWT token on success.
+    """
+    if payload.password == "admin123":
+        token_payload = {
+            "sub": "admin",
+            "role": "admin",
+            "exp": datetime.now(timezone.utc).timestamp() + 86400  # 24 hour token
+        }
+        token = jwt.encode(token_payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+        return {"token": token}
+    
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid administrative passphrase",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST / (Ingest a structured CandidateProfile)
+# ---------------------------------------------------------------------------
 @router.post(
     "/",
     status_code=status.HTTP_201_CREATED,
@@ -39,44 +144,26 @@ async def upload_profile(
 ) -> JSONResponse:
     """
     Ingests a structured CandidateProfile into the TalentMatch AI vector index.
-
-    Pipeline executed on every POST:
-      1. Synthesise skills, trajectory, and sparse text representations.
-      2. Generate dense embeddings for technical_skills and career_trajectory vectors.
-      3. Generate a SPLADE sparse embedding for the lexical_sparse vector.
-      4. Upsert a Qdrant PointStruct carrying all three named vectors and the
-         full candidate payload.
-
-    Returns HTTP 201 with the assigned Qdrant UUID on success.
-    Raises HTTP 500 on any vectorisation or storage failure.
+    Saves the profile to MongoDB Atlas and locally indexes it inside Qdrant.
     """
     try:
-        # Update metadata.json registry
-        metadata = {}
-        if _METADATA_FILE.exists():
-            try:
-                with _METADATA_FILE.open("r", encoding="utf-8") as fh:
-                    metadata = json.load(fh)
-                    if not isinstance(metadata, dict):
-                        metadata = {}
-            except Exception as exc:
-                logger.warning(f"Could not read metadata.json: {exc}")
-                metadata = {}
-
-        # Add profile to metadata dictionary
+        db = get_mongo_db()
         profile_data = profile.model_dump()
         profile_data["stored_at"] = datetime.now(timezone.utc).isoformat()
         profile_data["profile_path"] = None  # No file uploaded
-        metadata[profile.id] = profile_data
-
-        _STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-        with _METADATA_FILE.open("w", encoding="utf-8") as fh:
-            json.dump(metadata, fh, indent=4)
+        
+        # Save structured candidate profile in MongoDB Atlas
+        await db.profiles.update_one(
+            {"id": profile.id},
+            {"$set": profile_data},
+            upsert=True
+        )
+        logger.info(f"Structured JSON profile saved in MongoDB Atlas for candidate '{profile.id}'")
     except Exception as e:
-        logger.error(f"Failed to persist metadata for candidate '{profile.id}': {e}")
+        logger.error(f"Failed to persist metadata in MongoDB for candidate '{profile.id}': {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to persist candidate profile metadata: {str(e)}",
+            detail=f"Failed to persist candidate profile metadata in database: {str(e)}",
         )
 
     try:
@@ -104,80 +191,39 @@ async def upload_profile(
 
 
 # ---------------------------------------------------------------------------
-# GET /profiles/directory  –  MUST precede GET /{candidate_id} so FastAPI's
-# route matcher hits the static path before the wildcard capture group.
+# Endpoint: GET /profiles/directory (Secured with verify_admin_token)
 # ---------------------------------------------------------------------------
-
 @router.get(
     "/directory",
-    summary="Return a summary of all persisted candidate profiles on disk",
+    summary="Return a summary of all persisted candidate profiles from MongoDB Atlas",
     response_description=(
         "Metadata directory: total count, list of stored candidate summaries, "
-        "and the absolute path to the storage root."
+        "and the MongoDB Atlas path identifier."
     ),
 )
-async def get_stored_candidates_directory() -> JSONResponse:
+async def get_stored_candidates_directory(
+    payload: dict = Depends(verify_admin_token),
+) -> JSONResponse:
     """
-    Reads ``backend/storage/metadata.json`` and returns a structured summary of
-    every candidate profile that has been persisted to disk.
-
-    Response payload shape::
-
-        {
-            "total_stored": int,
-            "storage_path": str,
-            "candidates": [
-                {
-                    "candidate_id": str,
-                    "name": str,
-                    "stored_at": str | None,
-                    "profile_path": str | None
-                },
-                ...
-            ]
-        }
-
-    Returns an empty directory (total_stored=0) if the metadata file does not
-    exist yet rather than raising 404, so the frontend renders a zero-state
-    safely on a fresh installation.
+    Reads MongoDB Atlas 'profiles' collection and returns a structured summary of
+    every candidate profile that has been persisted to the cloud directory.
     """
-    if not _METADATA_FILE.exists():
-        logger.info(
-            "GET /profiles/directory – metadata.json not found; returning empty directory."
-        )
-        return JSONResponse(
-            status_code=200,
-            content={
-                "total_stored": 0,
-                "storage_path": str(_STORAGE_DIR),
-                "candidates": [],
-            },
-        )
-
     try:
-        with _METADATA_FILE.open("r", encoding="utf-8") as fh:
-            raw: dict = json.load(fh)
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.error(f"Failed to read metadata.json: {exc}")
+        db = get_mongo_db()
+        cursor = db.profiles.find({})
+        candidates_raw = []
+        async for doc in cursor:
+            candidates_raw.append(doc)
+    except Exception as exc:
+        logger.error(f"Failed to read profiles from MongoDB Atlas: {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not read storage metadata file: {exc}",
+            detail=f"Could not read MongoDB cloud directory: {str(exc)}",
         )
-
-    # metadata.json is expected to be either:
-    #   • A top-level dict keyed by candidate_id  → { "cid": { ...profile... } }
-    #   • A top-level list of profile dicts        → [ { "id": "cid", ... } ]
-    candidates_raw: list
-    if isinstance(raw, dict):
-        candidates_raw = [{"candidate_id": k, **v} for k, v in raw.items()]
-    elif isinstance(raw, list):
-        candidates_raw = raw
-    else:
-        candidates_raw = []
 
     candidates_summary = [
         {
-            "candidate_id": c.get("candidate_id") or c.get("id", "unknown"),
+            "candidate_id": c.get("id") or c.get("candidate_id") or "unknown",
             "name": c.get("name", "Unknown"),
             "stored_at": c.get("stored_at") or c.get("created_at"),
             "profile_path": c.get("profile_path") or c.get("file_path"),
@@ -186,18 +232,21 @@ async def get_stored_candidates_directory() -> JSONResponse:
     ]
 
     logger.info(
-        f"GET /profiles/directory – returning {len(candidates_summary)} stored profiles."
+        f"GET /profiles/directory – returning {len(candidates_summary)} stored profiles from MongoDB Atlas."
     )
     return JSONResponse(
         status_code=200,
         content={
             "total_stored": len(candidates_summary),
-            "storage_path": str(_STORAGE_DIR),
+            "storage_path": "MongoDB Atlas Cloud Storage",
             "candidates": candidates_summary,
         },
     )
 
 
+# ---------------------------------------------------------------------------
+# Endpoint: GET /{candidate_id}
+# ---------------------------------------------------------------------------
 @router.get(
     "/{candidate_id}",
     summary="Health-check: verify a candidate ID exists in the index",
@@ -243,6 +292,9 @@ async def get_profile_status(
         )
 
 
+# ---------------------------------------------------------------------------
+# Extraction Helpers
+# ---------------------------------------------------------------------------
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     try:
         pdf_file = io.BytesIO(file_bytes)
@@ -277,6 +329,9 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
         )
 
 
+# ---------------------------------------------------------------------------
+# Endpoint: POST /upload
+# ---------------------------------------------------------------------------
 @router.post(
     "/upload",
     status_code=status.HTTP_201_CREATED,
@@ -290,7 +345,8 @@ async def upload_resume_file(
     vector_store: VectorStoreService = Depends(get_vector_store_service),
 ) -> JSONResponse:
     """
-    Ingests and vectorises a candidate profile directly from an uploaded resume file (.pdf or .docx).
+    Ingests and vectorises a candidate profile directly from an uploaded resume file (.pdf, .docx, or .txt).
+    Checks MD5 cache footprint to short-circuit repetitive LLM parsing runs on duplicate file hits.
     """
     filename = file.filename or ""
     lower_filename = filename.lower()
@@ -315,6 +371,36 @@ async def upload_resume_file(
             detail=f"Could not read uploaded file: {str(e)}",
         )
 
+    # 1. Compute MD5 checksum to check cache footprint
+    md5_hash = hashlib.md5(contents).hexdigest()
+    if md5_hash in RESUME_EXTRACTION_CACHE:
+        logger.info(f"Resume extraction cache HIT for MD5: {md5_hash}")
+        cached_data = RESUME_EXTRACTION_CACHE[md5_hash]
+        try:
+            profile = CandidateProfile.model_validate(cached_data)
+            # Re-index in Qdrant to ensure synchronization
+            qdrant_id = await vector_store.upsert_candidate(profile, embedder)
+            logger.info(
+                f"Cached uploaded profile ingested – candidate_id='{profile.id}', "
+                f"qdrant_id='{qdrant_id}'."
+            )
+            return JSONResponse(
+                status_code=status.HTTP_201_CREATED,
+                content={
+                    "status": "indexed",
+                    "candidate_id": profile.id,
+                    "qdrant_id": qdrant_id,
+                    "profile": profile.model_dump(),
+                    "cached": True,
+                },
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to validate cached profile schema: {exc}. Processing cache miss.")
+
+    # Cache miss: run pipeline
+    logger.info(f"Resume extraction cache MISS for MD5: {md5_hash}. Invoking parsing pipeline.")
+
+    # 2. Parse text from file bytes
     if lower_filename.endswith(".pdf"):
         raw_text = extract_text_from_pdf(contents)
     elif lower_filename.endswith(".docx"):
@@ -337,6 +423,27 @@ async def upload_resume_file(
             detail="The uploaded resume file contains no readable text content.",
         )
 
+    # 3. Archive raw content string in MongoDB Atlas
+    try:
+        db = get_mongo_db()
+        await db.raw_resumes.update_one(
+            {"_id": md5_hash},
+            {"$set": {
+                "raw_content": raw_text,
+                "filename": filename,
+                "stored_at": datetime.now(timezone.utc).isoformat()
+            }},
+            upsert=True
+        )
+        logger.info(f"Archived raw content in MongoDB Atlas for MD5 footprint: {md5_hash}")
+    except Exception as exc:
+        logger.error(f"Failed to archive raw content in MongoDB Atlas: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"MongoDB Atlas raw resume archival failed: {str(exc)}",
+        )
+
+    # 4. Structure via LLM parsing
     try:
         profile = await parser.parse_candidate_profile(raw_text)
     except Exception as e:
@@ -346,43 +453,31 @@ async def upload_resume_file(
             detail=f"Failed to extract structured data from resume: {str(e)}",
         )
 
+    # 5. Save structured JSON profile to MongoDB Atlas
     try:
-        # Anonymize filename and save to disk
-        file_ext = Path(filename).suffix
-        anonymized_filename = f"{uuid.uuid4()}{file_ext}"
-        resumes_dir = _STORAGE_DIR / "resumes"
-        resumes_dir.mkdir(parents=True, exist_ok=True)
-        saved_file_path = resumes_dir / anonymized_filename
-        with open(saved_file_path, "wb") as f:
-            f.write(contents)
-
-        # Update metadata.json registry
-        metadata = {}
-        if _METADATA_FILE.exists():
-            try:
-                with _METADATA_FILE.open("r", encoding="utf-8") as fh:
-                    metadata = json.load(fh)
-                    if not isinstance(metadata, dict):
-                        metadata = {}
-            except Exception as exc:
-                logger.warning(f"Could not read metadata.json: {exc}")
-                metadata = {}
-
-        # Add profile to metadata dictionary
+        # Update MongoDB Atlas profiles collection
         profile_data = profile.model_dump()
         profile_data["stored_at"] = datetime.now(timezone.utc).isoformat()
-        profile_data["profile_path"] = str(saved_file_path)
-        metadata[profile.id] = profile_data
+        profile_data["profile_path"] = filename  # Use the uploaded filename as a reference
+        profile_data["md5_hash"] = md5_hash
 
-        with _METADATA_FILE.open("w", encoding="utf-8") as fh:
-            json.dump(metadata, fh, indent=4)
+        await db.profiles.update_one(
+            {"id": profile.id},
+            {"$set": profile_data},
+            upsert=True
+        )
+        logger.info(f"Saved structured JSON candidate profile in MongoDB Atlas for candidate '{profile.id}'")
     except Exception as e:
-        logger.error(f"Failed to persist file or metadata for candidate '{profile.id}': {e}")
+        logger.error(f"Failed to persist candidate profile in MongoDB for candidate '{profile.id}': {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to persist candidate profile files: {str(e)}",
+            detail=f"Failed to save candidate profile to MongoDB Atlas database: {str(e)}",
         )
 
+    # 6. Push variables to the cache memory dict
+    RESUME_EXTRACTION_CACHE[md5_hash] = profile.model_dump()
+
+    # 7. Index multi-vectors inside Qdrant
     try:
         qdrant_id = await vector_store.upsert_candidate(profile, embedder)
         logger.info(
@@ -396,6 +491,7 @@ async def upload_resume_file(
                 "candidate_id": profile.id,
                 "qdrant_id": qdrant_id,
                 "profile": profile.model_dump(),
+                "cached": False,
             },
         )
     except Exception as e:
@@ -407,12 +503,11 @@ async def upload_resume_file(
 
 
 # ---------------------------------------------------------------------------
-# POST /profiles/sync-recovery
+# Endpoint: POST /profiles/sync-recovery
 # ---------------------------------------------------------------------------
-
 @router.post(
     "/sync-recovery",
-    summary="Re-sync persisted disk profiles into the in-memory Qdrant vector store",
+    summary="Re-sync persisted MongoDB profiles into the in-memory Qdrant vector store",
     response_description=(
         "Recovery report: how many profiles were re-indexed, and which (if any) failed."
     ),
@@ -422,57 +517,28 @@ async def trigger_database_recovery_sync(
     vector_store: VectorStoreService = Depends(get_vector_store_service),
 ) -> JSONResponse:
     """
-    Reads every ``CandidateProfile`` record from ``backend/storage/metadata.json``
-    and re-upserts each one into the Qdrant collection.
-
-    This heals the in-memory vector index after backend reboot cycles without
-    requiring users to manually re-upload resume files.
-
-    Response payload shape::
-
-        {
-            "status": "ok" | "partial" | "failed" | "no_profiles",
-            "total_found": int,
-            "synced": int,
-            "failed": int,
-            "errors": [ { "candidate_id": str, "error": str }, ... ]
-        }
+    Reads every CandidateProfile record from MongoDB Atlas collection 'profiles'
+    and re-upserts each one into the live Qdrant collection.
     """
-    if not _METADATA_FILE.exists():
-        logger.info(
-            "POST /profiles/sync-recovery – metadata.json not found; nothing to sync."
-        )
-        return JSONResponse(
-            status_code=200,
-            content={
-                "status": "no_profiles",
-                "total_found": 0,
-                "synced": 0,
-                "failed": 0,
-                "errors": [],
-            },
-        )
-
     try:
-        with _METADATA_FILE.open("r", encoding="utf-8") as fh:
-            raw = json.load(fh)
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.error(f"sync-recovery: Failed to read metadata.json: {exc}")
+        db = get_mongo_db()
+        cursor = db.profiles.find({})
+        profiles_raw = []
+        async for doc in cursor:
+            # Clean MongoDB structural keys if needed
+            doc_id = doc.get("id") or doc.get("candidate_id")
+            if "id" not in doc and doc_id:
+                doc["id"] = doc_id
+            profiles_raw.append(doc)
+    except Exception as exc:
+        logger.error(f"sync-recovery: Failed to read from MongoDB Atlas: {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not read storage metadata file: {exc}",
+            detail=f"Could not read profiles from MongoDB Atlas: {exc}",
         )
 
-    # Normalise to a flat list of raw profile dicts
-    profiles_raw: list
-    if isinstance(raw, dict):
-        profiles_raw = [{"id": k, **v} for k, v in raw.items()]
-    elif isinstance(raw, list):
-        profiles_raw = raw
-    else:
-        profiles_raw = []
-
     if not profiles_raw:
+        logger.info("POST /profiles/sync-recovery – No profiles found in MongoDB; nothing to sync.")
         return JSONResponse(
             status_code=200,
             content={
@@ -491,7 +557,9 @@ async def trigger_database_recovery_sync(
     for raw_profile in profiles_raw:
         cid: str = raw_profile.get("id") or raw_profile.get("candidate_id", "unknown")
         try:
-            profile = CandidateProfile.model_validate(raw_profile)
+            # Strip MongoDB-specific keys to validate clean candidate profile schema
+            clean_profile = {k: v for k, v in raw_profile.items() if k not in ("_id", "stored_at", "profile_path", "md5_hash")}
+            profile = CandidateProfile.model_validate(clean_profile)
             await vector_store.upsert_candidate(profile, embedder)
             synced += 1
             logger.info(f"sync-recovery: Re-indexed candidate '{cid}'.")

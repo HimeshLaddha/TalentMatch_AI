@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     # llama-3.3-70b-specdec was decommissioned; versatile is the recommended replacement
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
     ENVIRONMENT: str = "development"
+    MONGODB_URI: str | None = None
+    MONGO_URI: str | None = None
+    JWT_SECRET: str = "super-secret-key-change-in-production"
+    JWT_ALGORITHM: str = "HS256"
 
     model_config = SettingsConfigDict(env_file=[".env", "backend/.env", "../.env"], extra="ignore")
 

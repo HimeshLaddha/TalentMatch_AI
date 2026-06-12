@@ -91,3 +91,6 @@ storage/
 metadata.json
 *.log
 logs/
+
+India_runs_data_and_ai_challenge/
+seed_factory.py
