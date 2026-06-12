@@ -357,10 +357,10 @@ async def upload_resume_file(
             detail="Legacy .doc format is not supported. Please convert your file to .docx or .pdf for automatic extraction.",
         )
 
-    if not (lower_filename.endswith(".pdf") or lower_filename.endswith(".docx") or lower_filename.endswith(".txt")):
+    if not (lower_filename.endswith(".pdf") or lower_filename.endswith(".docx") or lower_filename.endswith(".txt") or lower_filename.endswith(".json")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported file extension. Only .pdf, .docx, and .txt files are supported.",
+            detail="Unsupported file extension. Only .pdf, .docx, .txt, and .json files are supported.",
         )
 
     try:

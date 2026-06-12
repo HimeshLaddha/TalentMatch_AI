@@ -3,14 +3,23 @@
 import React, { useState, useRef } from "react";
 import { CandidateProfile } from "@/types";
 
+export interface UploadTask {
+  id: string;
+  name: string;
+  size: number;
+  status: "queued" | "uploading" | "success" | "error";
+  errorMsg?: string;
+  candidateId?: string;
+}
+
 export default function CandidatePortal() {
   // Drag and drop states
   const [isDragActive, setIsDragActive] = useState(false);
   
-  // UI Loading/Error/Success states
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // Real-time Upload Queue
+  const [uploadQueue, setUploadQueue] = useState<UploadTask[]>([]);
+
+  // Last parsed profile for details preview panel
   const [lastParsedProfile, setLastParsedProfile] = useState<CandidateProfile | null>(null);
 
   // Local session history of ingested profiles
@@ -34,52 +43,49 @@ export default function CandidatePortal() {
     e.preventDefault();
     e.stopPropagation();
     setIsDragActive(false);
-    setError(null);
-    setSuccessMessage(null);
-    setLastParsedProfile(null);
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const droppedFile = e.dataTransfer.files[0];
-      validateAndProcessFile(droppedFile);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFiles(e.dataTransfer.files);
     }
   };
 
   // Input change handler
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setError(null);
-    setSuccessMessage(null);
-    setLastParsedProfile(null);
-    
-    if (e.target.files && e.target.files[0]) {
-      validateAndProcessFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      handleFiles(e.target.files);
     }
   };
 
-  // Check file extension
-  const validateAndProcessFile = (selectedFile: File) => {
-    const filename = selectedFile.name.toLowerCase();
-    
-    // Explicit constraint check for legacy .doc
-    if (filename.endsWith(".doc") && !filename.endsWith(".docx")) {
-      setError("Legacy .doc format is not supported. Please save your file as .docx or .pdf for automatic extraction.");
-      return;
-    }
+  const handleFiles = (files: FileList) => {
+    const filesArray = Array.from(files);
+    const newTasks: UploadTask[] = filesArray.map(file => ({
+      id: `${file.name}-${Date.now()}-${Math.random()}`,
+      name: file.name,
+      size: file.size,
+      status: "queued"
+    }));
 
-    if (!(filename.endsWith(".pdf") || filename.endsWith(".docx"))) {
-      setError("Unsupported file format. Please upload a PDF (.pdf) or Word document (.docx).");
-      return;
-    }
+    // Add all to queue
+    setUploadQueue(prev => [...newTasks, ...prev]);
 
-    // Auto-upload immediately for frictionless UX
-    uploadFile(selectedFile);
+    // Concurrently upload them
+    newTasks.forEach((task, idx) => {
+      const file = filesArray[idx];
+      const filename = file.name.toLowerCase();
+      
+      // Restrict acceptable formats strictly to '.pdf', '.docx', and '.json'
+      if (!(filename.endsWith(".pdf") || filename.endsWith(".docx") || filename.endsWith(".json"))) {
+        setUploadQueue(prev => prev.map(t => t.id === task.id ? { ...t, status: "error", errorMsg: "Unsupported format. Only .pdf, .docx, and .json are allowed." } : t));
+        return;
+      }
+
+      uploadFile(file, task);
+    });
   };
 
   // Upload file via FormData stream
-  const uploadFile = async (targetFile: File) => {
-    setIsLoading(true);
-    setError(null);
-    setSuccessMessage(null);
-    setLastParsedProfile(null);
+  const uploadFile = async (targetFile: File, task: UploadTask) => {
+    setUploadQueue(prev => prev.map(t => t.id === task.id ? { ...t, status: "uploading" } : t));
 
     const formData = new FormData();
     formData.append("file", targetFile);
@@ -97,8 +103,7 @@ export default function CandidatePortal() {
 
       const data = await response.json();
       
-      // Successfully ingested
-      setSuccessMessage(`Resume "${targetFile.name}" successfully parsed and indexed in vector store.`);
+      setUploadQueue(prev => prev.map(t => t.id === task.id ? { ...t, status: "success", candidateId: data.candidate_id } : t));
       
       if (data.profile) {
         const profile = data.profile as CandidateProfile;
@@ -107,9 +112,7 @@ export default function CandidatePortal() {
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Failed to process resume upload. Please verify API server is online.";
-      setError(errMsg);
-    } finally {
-      setIsLoading(false);
+      setUploadQueue(prev => prev.map(t => t.id === task.id ? { ...t, status: "error", errorMsg: errMsg } : t));
     }
   };
 
@@ -165,7 +168,8 @@ export default function CandidatePortal() {
                 ref={fileInputRef}
                 type="file"
                 className="hidden"
-                accept=".pdf,.docx,.doc"
+                accept=".pdf,.docx,.json"
+                multiple
                 onChange={handleFileChange}
               />
               
@@ -176,49 +180,82 @@ export default function CandidatePortal() {
               </div>
 
               <h3 className="font-semibold text-slate-200 text-sm">
-                Drag and drop resume here
+                Drag and drop resumes here
               </h3>
               <p className="text-slate-500 text-xs mt-1.5 max-w-xs">
-                Supports PDF (.pdf) and Microsoft Word (.docx) files. Click to browse files from explorer.
+                Supports PDF (.pdf), Word (.docx), and JSON (.json) files. Click to browse files from explorer.
               </p>
             </div>
           </div>
 
-          {/* Feedback alerts container */}
-          {error && (
-            <div className="bg-rose-950/20 border border-rose-500/30 rounded-xl p-4 flex items-start gap-3 text-rose-300 text-sm animate-fade-in">
-              <svg className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <div>
-                <span className="font-bold">Ingestion Blocked:</span> {error}
-              </div>
-            </div>
-          )}
+          {/* Real-time Monitor Task Board */}
+          {uploadQueue.length > 0 && (
+            <div className="bg-slate-950/50 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-md space-y-4">
+              <h2 className="text-lg font-bold text-slate-100 flex items-center justify-between border-b border-slate-800/60 pb-3">
+                <span className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  Processing Queue
+                </span>
+                <span className="text-xs text-slate-500 font-mono">
+                  {uploadQueue.filter(t => t.status === "uploading").length} active
+                </span>
+              </h2>
+              <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                {uploadQueue.map((task) => (
+                  <div
+                    key={task.id}
+                    className="p-3.5 rounded-xl bg-slate-900/40 border border-slate-800/80 hover:border-slate-700/50 transition-all flex flex-col gap-2 animate-fade-in"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-xs font-semibold text-slate-200 block truncate" title={task.name}>
+                          {task.name}
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {Math.round(task.size / 1024)} KB
+                        </span>
+                      </div>
+                      
+                      {/* Status Pillar Badge */}
+                      <div>
+                        {task.status === "queued" && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">
+                            Queued
+                          </span>
+                        )}
+                        {task.status === "uploading" && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20 animate-pulse">
+                            Uploading
+                          </span>
+                        )}
+                        {task.status === "success" && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            Success
+                          </span>
+                        )}
+                        {task.status === "error" && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                            Error
+                          </span>
+                        )}
+                      </div>
+                    </div>
 
-          {successMessage && (
-            <div className="bg-emerald-950/20 border border-emerald-500/30 rounded-xl p-4 flex items-start gap-3 text-emerald-300 text-sm animate-fade-in">
-              <svg className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <div>
-                <span className="font-bold">Ingestion Success:</span> {successMessage}
-              </div>
-            </div>
-          )}
-
-          {/* Glowing pulse loading banner */}
-          {isLoading && (
-            <div className="bg-indigo-950/20 border border-indigo-500/30 rounded-xl p-6 shadow-indigo-500/5 shadow-md flex items-center gap-4 animate-pulse">
-              <div className="relative shrink-0 flex h-6 w-6">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-6 w-6 bg-indigo-500 flex items-center justify-center text-[10px] text-white font-bold font-mono">AI</span>
-              </div>
-              <div className="space-y-1">
-                <h4 className="text-sm font-semibold text-indigo-300">Extracting Profile</h4>
-                <p className="text-xs text-slate-400">
-                  AI is analyzing resume layout and generating vector slots... Please wait.
-                </p>
+                    {/* Error message or candidate id detail */}
+                    {task.status === "error" && task.errorMsg && (
+                      <div className="text-[10px] text-rose-400/90 bg-rose-950/10 border border-rose-500/10 p-2 rounded-lg mt-1">
+                        <span className="font-bold">Error:</span> {task.errorMsg}
+                      </div>
+                    )}
+                    {task.status === "success" && task.candidateId && (
+                      <div className="text-[10px] text-emerald-400/95 bg-emerald-950/10 border border-emerald-500/10 p-2 rounded-lg mt-1 font-mono">
+                        <span className="font-bold">Ingested Profile ID:</span> {task.candidateId}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           )}
