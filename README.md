@@ -123,10 +123,36 @@ pytest tests/test_services.py
 ```
 
 ### 3. Running the FastAPI Application
-Start the development server:
+To start the backend development server:
 ```bash
+# Navigate to the backend directory
+cd backend
+
+# Start the development server
 uvicorn app.main:app --reload
 ```
 Access the interactive documentation at:
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
+
+### 🔑 Admin Authentication
+Certain backend endpoints (such as `GET /api/v1/profiles/directory`) require administrative authentication:
+- **Login Endpoint:** `POST /api/v1/profiles/login`
+- **JSON Payload:** `{"password": "admin123"}`
+- **Admin Password:** `admin123`
+- On successful authentication, the server returns a signed JWT token. Supply this token as a Bearer token in the `Authorization` header (`Authorization: Bearer <token>`) for subsequent secured API calls.
+
+### 💻 Running the Frontend Application
+To start the React/TypeScript frontend development server:
+```bash
+# Navigate to the frontend directory
+cd frontend
+
+# Install dependencies (if not already done)
+npm install
+
+# Start Vite dev server
+npm run dev
+```
+The frontend is available locally at: `http://localhost:5173` (or the port specified in the Vite console output).
+
