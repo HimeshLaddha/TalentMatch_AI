@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import tempfile
 import uuid
 from typing import AsyncGenerator
 
@@ -33,10 +34,6 @@ router = APIRouter()
 
 # Temp directory for uploaded candidate files
 _TMP_BASE = os.path.join(tempfile.gettempdir(), "talentmatch")
-
-# Import here so the module-level import does not fail on Windows where
-# tempfile is always available; actual tempfile usage is in the handler.
-import tempfile  # noqa: E402 (stdlib — always present)
 
 
 # ---------------------------------------------------------------------------

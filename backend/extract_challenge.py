@@ -172,57 +172,74 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
 # ---------------------------------------------------------------------------
 # Public export: load + score all candidates from a gz_path
 # ---------------------------------------------------------------------------
-def score_all(gz_path: str) -> list[dict]:
+def score_all(gz_path: str = "", *, candidates: list[dict] | None = None) -> list[dict]:
     """
-    Streams candidates from gz_path (or falls back to sibling .jsonl / sample_candidates.json),
-    applies compute_candidate_score() to each, sorts descending by score,
-    assigns rank 1-100 to the top 100, and returns the ranked list.
+    Scores and ranks candidates from either an in-memory list or a file path.
+
+    When *candidates* is provided (keyword-only), file I/O is skipped entirely —
+    this path is used by the pytest fixtures so no gz file is needed in CI.
+
+    When *candidates* is None (default), the function falls back to reading from:
+        1. gz_path  (gzip JSONL)
+        2. <dir>/candidates.jsonl
+        3. <dir>/sample_candidates.json
+
+    Applies compute_candidate_score() to each record, sorts descending by score
+    with lexicographic candidate_id tie-breaking, assigns rank 1-N to the top 100,
+    and returns the ranked list.
 
     This is the single source of truth for heuristic scoring — imported by
     tasks/pipeline.py to avoid any logic duplication.
     """
-    candidates: list[dict] = []
-    base = os.path.dirname(gz_path)
-    jsonl_path = os.path.join(base, "candidates.jsonl")
-    sample_path = os.path.join(base, "sample_candidates.json")
+    loaded: list[dict]
 
-    if os.path.exists(gz_path):
-        logger.info(f"score_all: reading compressed source: {gz_path}")
-        try:
-            with gzip.open(gz_path, "rt", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        candidates.append(json.loads(line))
-        except Exception as e:
-            logger.error(f"score_all: failed to read compressed file: {e}")
+    if candidates is not None:
+        # In-memory path — used by tests; no file I/O
+        loaded = list(candidates)
+        logger.info(f"score_all: using in-memory candidate list ({len(loaded)} records).")
+    else:
+        loaded = []
+        base = os.path.dirname(gz_path) if gz_path else ""
+        jsonl_path = os.path.join(base, "candidates.jsonl") if base else ""
+        sample_path = os.path.join(base, "sample_candidates.json") if base else ""
 
-    if not candidates and os.path.exists(jsonl_path):
-        logger.info(f"score_all: reading fallback jsonl: {jsonl_path}")
-        try:
-            with open(jsonl_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        candidates.append(json.loads(line))
-        except Exception as e:
-            logger.error(f"score_all: failed to read jsonl file: {e}")
+        if gz_path and os.path.exists(gz_path):
+            logger.info(f"score_all: reading compressed source: {gz_path}")
+            try:
+                with gzip.open(gz_path, "rt", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            loaded.append(json.loads(line))
+            except Exception as e:
+                logger.error(f"score_all: failed to read compressed file: {e}")
 
-    if not candidates and os.path.exists(sample_path):
-        logger.info(f"score_all: reading fallback sample JSON: {sample_path}")
-        try:
-            with open(sample_path, "r", encoding="utf-8") as f:
-                candidates = json.load(f)
-        except Exception as e:
-            logger.error(f"score_all: failed to read sample candidates file: {e}")
+        if not loaded and jsonl_path and os.path.exists(jsonl_path):
+            logger.info(f"score_all: reading fallback jsonl: {jsonl_path}")
+            try:
+                with open(jsonl_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            loaded.append(json.loads(line))
+            except Exception as e:
+                logger.error(f"score_all: failed to read jsonl file: {e}")
 
-    if not candidates:
-        raise FileNotFoundError(
-            f"score_all: no candidate data found at {gz_path} or fallback paths."
-        )
+        if not loaded and sample_path and os.path.exists(sample_path):
+            logger.info(f"score_all: reading fallback sample JSON: {sample_path}")
+            try:
+                with open(sample_path, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+            except Exception as e:
+                logger.error(f"score_all: failed to read sample candidates file: {e}")
 
-    logger.info(f"score_all: loaded {len(candidates)} candidate profiles.")
+        if not loaded:
+            raise FileNotFoundError(
+                f"score_all: no candidate data found at '{gz_path}' or fallback paths."
+            )
+
+        logger.info(f"score_all: loaded {len(loaded)} candidate profiles from disk.")
 
     scored: list[dict] = []
-    for cand in candidates:
+    for cand in loaded:
         cid = cand.get("candidate_id") or "CAND_0000000"
         score, sub_scores, reasoning, xai = compute_candidate_score(cand)
         scored.append({
