@@ -4,11 +4,18 @@ import csv
 import os
 import sys
 import logging
+import subprocess
+import asyncio
 from datetime import datetime
+from dotenv import load_dotenv
+from motor.motor_asyncio import AsyncIOMotorClient
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("extract_challenge")
+
+# Load environment variables
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 # ---------------------------------------------------------------------------
 # Path configuration
@@ -20,6 +27,34 @@ SAMPLE_CANDIDATES = os.path.join(BASE_DIR, "sample_candidates.json")
 
 SUBMISSION_CSV = os.path.join(BASE_DIR, "submission.csv")
 LEADERBOARD_MD = os.path.join(BASE_DIR, "India_runs_final_leaderboard.md")
+
+# ---------------------------------------------------------------------------
+# MongoDB Atlas Cleanse
+# ---------------------------------------------------------------------------
+async def cleanse_mongodb():
+    mongo_uri = os.environ.get("MONGO_URI") or os.environ.get("MONGODB_URI")
+    if not mongo_uri:
+        logger.warning("MONGO_URI environment variable not found. Skipping database cleansing.")
+        return
+    
+    logger.info("Connecting to MongoDB Atlas to cleanse test collections...")
+    try:
+        client = AsyncIOMotorClient(mongo_uri)
+        db = client["talentmatch"]
+        
+        # Completely wipe raw_resumes, structured_profiles, and profiles collections
+        await db.raw_resumes.delete_many({})
+        logger.info("Wiped 'raw_resumes' collection.")
+        
+        await db.structured_profiles.delete_many({})
+        logger.info("Wiped 'structured_profiles' collection.")
+        
+        await db.profiles.delete_many({})
+        logger.info("Wiped 'profiles' collection.")
+        
+        logger.info("MongoDB Atlas cleansing complete.")
+    except Exception as e:
+        logger.error(f"Error during MongoDB cleansing: {e}")
 
 # ---------------------------------------------------------------------------
 # Guarded Heuristic Scoring Engine
@@ -45,7 +80,7 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
         exp_score = max(0.0, 1.0 - (yoe - 9.0) * 0.15)
         
     # 2. Role Title Verification (Anti-Keyword Stuffing Trap)
-    tech_tokens = ["engineer", "developer", "scientist", "architect", "lead", "cto"]
+    tech_tokens = ["engineer", "developer", "scientist", "architect", "lead", "cto", "programmer"]
     titles = [profile.get("current_title", "")] + [h.get("title", "") for h in history if h]
     titles = [t.lower() for t in titles if t]
     
@@ -137,8 +172,11 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
 # ---------------------------------------------------------------------------
 # Ingestion matrix & execution loop
 # ---------------------------------------------------------------------------
-def run_pipeline():
+async def run_pipeline():
     logger.info("Starting automated challenge ingestion and ranking pipeline...")
+    
+    # 1. Cleanse and Purge Old Test Profiles
+    await cleanse_mongodb()
     
     candidates = []
     
@@ -250,7 +288,40 @@ def run_pipeline():
     except Exception as e:
         logger.error(f"Failed to write Markdown leaderboard: {e}")
         
+    # Copy generated assets to the 'submission' folder at root workspace
+    logger.info("Copying final assets to 'submission' folder...")
+    try:
+        submission_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "submission")
+        os.makedirs(submission_dir, exist_ok=True)
+        import shutil
+        shutil.copy2(SUBMISSION_CSV, os.path.join(submission_dir, "submission.csv"))
+        shutil.copy2(LEADERBOARD_MD, os.path.join(submission_dir, "India_runs_final_leaderboard.md"))
+        logger.info(f"Successfully stored final assets in: {submission_dir}")
+    except Exception as e:
+        logger.error(f"Failed to copy final assets to 'submission' folder: {e}")
+
+    # 5. Execute Format Verification
+    logger.info("Executing format verification on the generated submission.csv...")
+    validator_script = os.path.join(BASE_DIR, "validate_submission.py")
+    try:
+        res = subprocess.run(
+            [sys.executable, validator_script, SUBMISSION_CSV],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        logger.info(f"Validator Output:\n{res.stdout.strip()}")
+        logger.info("Format verification passed successfully (Exit code 0).")
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Validator failed with exit code {e.returncode}:")
+        logger.error(f"Validator STDOUT:\n{e.stdout}")
+        logger.error(f"Validator STDERR:\n{e.stderr}")
+        sys.exit(e.returncode)
+    except Exception as e:
+        logger.error(f"Failed to execute format verification script: {e}")
+        sys.exit(1)
+
     logger.info("Pipeline run successfully complete.")
 
 if __name__ == "__main__":
-    run_pipeline()
+    asyncio.run(run_pipeline())
