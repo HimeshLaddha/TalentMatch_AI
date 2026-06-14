@@ -72,3 +72,34 @@ services:
     networks:
       - talentmatch_net
     restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # RabbitMQ (Celery broker with management UI on :15672)
+  # ---------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: talentmatch
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    networks:
+      - talentmatch_net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Celery worker — runs the 3-task ranking pipeline
+  # ---------------------------------------------------------------------------
+  celery_worker:
+    build: ./backend
+    command: celery -A tasks.pipeline worker --loglevel=info --concurrency=4
+    env_file: .env
+    depends_on:
+      - rabbitmq
+      - mongo
+      - qdrant
+      - redis
+    networks:
+      - talentmatch_net
+    restart: unless-stopped

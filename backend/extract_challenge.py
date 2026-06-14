@@ -170,73 +170,129 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
     return final_score, sub_scores, reasoning, xai_details
 
 # ---------------------------------------------------------------------------
-# Ingestion matrix & execution loop
+# Public export: load + score all candidates from a gz_path
 # ---------------------------------------------------------------------------
-async def run_pipeline():
-    logger.info("Starting automated challenge ingestion and ranking pipeline...")
-    
-    # 1. Cleanse and Purge Old Test Profiles
-    await cleanse_mongodb()
-    
-    candidates = []
-    
-    # Ingestion Matrix
-    if os.path.exists(CANDIDATES_GZ):
-        logger.info(f"Reading candidate pool from compressed source: {CANDIDATES_GZ}")
+def score_all(gz_path: str) -> list[dict]:
+    """
+    Streams candidates from gz_path (or falls back to sibling .jsonl / sample_candidates.json),
+    applies compute_candidate_score() to each, sorts descending by score,
+    assigns rank 1-100 to the top 100, and returns the ranked list.
+
+    This is the single source of truth for heuristic scoring — imported by
+    tasks/pipeline.py to avoid any logic duplication.
+    """
+    candidates: list[dict] = []
+    base = os.path.dirname(gz_path)
+    jsonl_path = os.path.join(base, "candidates.jsonl")
+    sample_path = os.path.join(base, "sample_candidates.json")
+
+    if os.path.exists(gz_path):
+        logger.info(f"score_all: reading compressed source: {gz_path}")
         try:
-            with gzip.open(CANDIDATES_GZ, "rt", encoding="utf-8") as f:
+            with gzip.open(gz_path, "rt", encoding="utf-8") as f:
                 for line in f:
                     if line.strip():
                         candidates.append(json.loads(line))
         except Exception as e:
-            logger.error(f"Failed to read compressed file: {e}")
-            
-    if not candidates and os.path.exists(CANDIDATES_JSONL):
-        logger.info(f"Reading candidate pool from fallback jsonl source: {CANDIDATES_JSONL}")
+            logger.error(f"score_all: failed to read compressed file: {e}")
+
+    if not candidates and os.path.exists(jsonl_path):
+        logger.info(f"score_all: reading fallback jsonl: {jsonl_path}")
         try:
-            with open(CANDIDATES_JSONL, "r", encoding="utf-8") as f:
+            with open(jsonl_path, "r", encoding="utf-8") as f:
                 for line in f:
                     if line.strip():
                         candidates.append(json.loads(line))
         except Exception as e:
-            logger.error(f"Failed to read jsonl file: {e}")
-            
-    if not candidates and os.path.exists(SAMPLE_CANDIDATES):
-        logger.info(f"Reading candidate pool from fallback sample JSON: {SAMPLE_CANDIDATES}")
+            logger.error(f"score_all: failed to read jsonl file: {e}")
+
+    if not candidates and os.path.exists(sample_path):
+        logger.info(f"score_all: reading fallback sample JSON: {sample_path}")
         try:
-            with open(SAMPLE_CANDIDATES, "r", encoding="utf-8") as f:
+            with open(sample_path, "r", encoding="utf-8") as f:
                 candidates = json.load(f)
         except Exception as e:
-            logger.error(f"Failed to read sample candidates file: {e}")
-            
+            logger.error(f"score_all: failed to read sample candidates file: {e}")
+
     if not candidates:
-        logger.critical("No candidate datasets were found inside the official challenge directory.")
-        sys.exit(1)
-        
-    logger.info(f"Successfully loaded {len(candidates)} candidate profiles.")
-    
-    # Run Scoring
-    scored_candidates = []
+        raise FileNotFoundError(
+            f"score_all: no candidate data found at {gz_path} or fallback paths."
+        )
+
+    logger.info(f"score_all: loaded {len(candidates)} candidate profiles.")
+
+    scored: list[dict] = []
     for cand in candidates:
         cid = cand.get("candidate_id") or "CAND_0000000"
         score, sub_scores, reasoning, xai = compute_candidate_score(cand)
-        
-        scored_candidates.append({
+        scored.append({
             "candidate_id": cid,
             "score": score,
             "sub_scores": sub_scores,
             "reasoning": reasoning,
-            "xai": xai
+            "xai": xai,
         })
-        
-    # Sort and Apply Tie-Breaking: Descending by score, then Ascending by candidate_id lexicographically
-    scored_candidates.sort(key=lambda x: (-x["score"], x["candidate_id"]))
-    
-    # Slice the top 100 and assign rank
-    top_100 = scored_candidates[:100]
+
+    scored.sort(key=lambda x: (-x["score"], x["candidate_id"]))
+    top_100 = scored[:100]
     for rank, cand in enumerate(top_100, 1):
         cand["rank"] = rank
-        
+
+    return top_100
+
+
+# ---------------------------------------------------------------------------
+# Public export: generate XAI explanations for the top-3 candidates
+# ---------------------------------------------------------------------------
+def call_llm_xai(candidates: list[dict]) -> list[dict]:
+    """
+    Accepts the ranked candidate list (output of score_all), generates
+    Explainable AI (XAI) markdown narrative for the top-3 candidates by
+    enriching each dict with an "xai_narrative" key.
+
+    The XAI data (name, strongest_alignment, competency_gaps, prompts) is
+    already computed by compute_candidate_score() and stored in cand["xai"].
+    This function formats that pre-computed data into a human-readable
+    narrative string — no LLM API calls are required for the heuristic path.
+
+    Returns the full candidates list with top-3 entries augmented.
+    """
+    for i, cand in enumerate(candidates[:3]):
+        xai = cand.get("xai", {})
+        prompts_md = "\n".join(
+            f"  {j+1}. {q}" for j, q in enumerate(xai.get("prompts", []))
+        )
+        narrative = (
+            f"**Rank #{cand['rank']}: {xai.get('name', 'Candidate X')} ({cand['candidate_id']})**\n"
+            f"- Strongest Alignment: {xai.get('strongest_alignment', '')}\n"
+            f"- Competency Gaps: {xai.get('competency_gaps', '')}\n"
+            f"- Tailored Interview Prompts:\n{prompts_md}"
+        )
+        cand["xai_narrative"] = narrative
+        logger.info(f"call_llm_xai: generated XAI narrative for rank #{cand['rank']}")
+    return candidates
+
+
+# ---------------------------------------------------------------------------
+# Ingestion matrix & execution loop
+# ---------------------------------------------------------------------------
+async def run_pipeline():
+    logger.info("Starting automated challenge ingestion and ranking pipeline...")
+
+    # 1. Cleanse and Purge Old Test Profiles
+    await cleanse_mongodb()
+
+    # ---------------------------------------------------------------------------
+    # Ingestion + Scoring — delegate to score_all() to avoid logic duplication
+    # ---------------------------------------------------------------------------
+    try:
+        top_100 = score_all(CANDIDATES_GZ)
+    except FileNotFoundError:
+        logger.critical("No candidate datasets were found inside the official challenge directory.")
+        sys.exit(1)
+
+    logger.info(f"Successfully loaded and scored candidates; top_100 has {len(top_100)} entries.")
+    
     # Compile Output CSV
     logger.info(f"Exporting top 100 ranking to CSV file: {SUBMISSION_CSV}")
     try:
