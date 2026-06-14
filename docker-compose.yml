@@ -1,0 +1,74 @@
+version: "3.9"
+
+networks:
+  talentmatch_net:
+    driver: bridge
+
+volumes:
+  mongo_data:
+  qdrant_data:
+
+services:
+  # ---------------------------------------------------------------------------
+  # FastAPI backend
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mongo
+      - qdrant
+      - redis
+    networks:
+      - talentmatch_net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Next.js frontend
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    networks:
+      - talentmatch_net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MongoDB 7
+  # ---------------------------------------------------------------------------
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - talentmatch_net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Qdrant vector store
+  # ---------------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - talentmatch_net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Redis (LRU cache, 512 MB cap)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    networks:
+      - talentmatch_net
+    restart: unless-stopped

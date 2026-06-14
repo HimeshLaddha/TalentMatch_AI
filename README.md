@@ -138,8 +138,8 @@ Access the interactive documentation at:
 ### 🔑 Admin Authentication
 Certain backend endpoints (such as `GET /api/v1/profiles/directory`) require administrative authentication:
 - **Login Endpoint:** `POST /api/v1/profiles/login`
-- **JSON Payload:** `{"password": "admin123"}`
-- **Admin Password:** `admin123`
+- **JSON Payload:** `{"password": "<value of ADMIN_PASSWORD env var>"}`
+- **Admin Password:** Set via the `ADMIN_PASSWORD` environment variable (see `.env.example`)
 - On successful authentication, the server returns a signed JWT token. Supply this token as a Bearer token in the `Authorization` header (`Authorization: Bearer <token>`) for subsequent secured API calls.
 
 ### 💻 Running the Frontend Application
