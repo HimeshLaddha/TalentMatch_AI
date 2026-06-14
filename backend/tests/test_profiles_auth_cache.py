@@ -1,3 +1,4 @@
+import os
 import pytest
 import jwt
 from datetime import datetime, timezone
@@ -119,7 +120,8 @@ def test_admin_login(mock_get_db):
     """
     Test POST /profiles/login yields a valid signed JWT token for the admin.
     """
-    response = client.post("/api/v1/profiles/login", json={"password": "admin123"})
+    # TODO: load from environment — never hardcode
+    response = client.post("/api/v1/profiles/login", json={"password": os.getenv("ADMIN_PASSWORD", "")})
     assert response.status_code == 200
     token = response.json().get("token")
     assert token is not None

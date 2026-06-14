@@ -1,4 +1,5 @@
 import json
+import os
 import logging
 from pathlib import Path
 import uuid
@@ -113,7 +114,8 @@ async def login_admin(payload: LoginRequest):
     """
     Validates the administrative password and returns a signed JWT token on success.
     """
-    if payload.password == "admin123":
+    # TODO: load from environment — never hardcode
+    if payload.password == os.getenv("ADMIN_PASSWORD", ""):
         token_payload = {
             "sub": "admin",
             "role": "admin",
