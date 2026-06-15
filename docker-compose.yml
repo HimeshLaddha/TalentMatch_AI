@@ -18,6 +18,10 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env
+    environment:
+      - QDRANT_HOST=qdrant
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://talentmatch:rabbitmq@rabbitmq:5672/
     ports:
       - "8000:8000"
     depends_on:
@@ -57,6 +61,9 @@ services:
   # ---------------------------------------------------------------------------
   qdrant:
     image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
@@ -69,6 +76,43 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    networks:
+      - talentmatch_net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # RabbitMQ (Celery broker with management UI on :15672)
+  # ---------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: talentmatch
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    networks:
+      - talentmatch_net
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Celery worker — runs the 3-task ranking pipeline
+  # ---------------------------------------------------------------------------
+  celery_worker:
+    build: ./backend
+    command: celery -A tasks.pipeline worker --loglevel=info --concurrency=4
+    env_file: .env
+    environment:
+      - QDRANT_HOST=qdrant
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://talentmatch:rabbitmq@rabbitmq:5672/
+    depends_on:
+      - rabbitmq
+      - mongo
+      - qdrant
+      - redis
     networks:
       - talentmatch_net
     restart: unless-stopped

@@ -1,0 +1,8 @@
+candidate_id,rank,score,reasoning
+test_e2e_celery_01,1,0.677,"**Rank #1: E2E Celery Candidate (test_e2e_celery_01)**
+- Strongest Alignment: Matches 4 core AI skills (python, pytorch, llm, rag) with a technical career track of 6.0 years of experience.
+- Competency Gaps: Lacks explicit skills in embeddings, retrieval, ranking.
+- Tailored Interview Prompts:
+  1. Can you walk us through the system architecture of your most advanced retrieval or ranking system?
+  2. How did you handle indexing latency or embedding drift in your previous roles?
+  3. What evaluation frameworks (NDCG, MAP, etc.) did you design to validate ranking quality?"

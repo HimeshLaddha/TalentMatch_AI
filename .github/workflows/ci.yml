@@ -1,0 +1,86 @@
+name: TalentMatch CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 1: Backend — scoring invariant tests, API endpoint tests, pipeline check
+  # ─────────────────────────────────────────────────────────────────────────────
+  backend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest pytest-asyncio httpx
+
+      - name: Run scoring invariant tests
+        run: pytest tests/test_scoring_invariants.py -v
+        env:
+          MONGO_URI: "mongodb://localhost:27017/test"
+          QDRANT_HOST: "localhost"
+          REDIS_URL: "redis://localhost:6379"
+          RABBITMQ_URL: "amqp://guest:guest@localhost:5672/"
+          ADMIN_PASSWORD: "ci_test_only"
+          GROQ_API_KEY: "dummy"
+          OPENAI_API_KEY: "dummy"
+          GEMINI_API_KEY: "dummy"
+          JWT_SECRET: "ci_test_secret_32_chars_minimum"
+
+      - name: Run API endpoint tests
+        run: pytest tests/test_api_endpoints.py -v
+        env:
+          MONGO_URI: "mongodb://localhost:27017/test"
+          QDRANT_HOST: "localhost"
+          REDIS_URL: "redis://localhost:6379"
+          RABBITMQ_URL: "amqp://guest:guest@localhost:5672/"
+          ADMIN_PASSWORD: "ci_test_only"
+          GROQ_API_KEY: "dummy"
+          OPENAI_API_KEY: "dummy"
+          GEMINI_API_KEY: "dummy"
+          JWT_SECRET: "ci_test_secret_32_chars_minimum"
+
+      - name: Run pipeline invariant check
+        run: PYTHONPATH=. python run_pipeline_check.py --sample-only
+        env:
+          MONGO_URI: "mongodb://localhost:27017/test"
+          QDRANT_HOST: "localhost"
+          REDIS_URL: "redis://localhost:6379"
+          GROQ_API_KEY: "dummy"
+          GEMINI_API_KEY: "dummy"
+          JWT_SECRET: "ci_test_secret_32_chars_minimum"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Job 2: Frontend — lint + build
+  # ─────────────────────────────────────────────────────────────────────────────
+  frontend-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build

@@ -26,9 +26,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-950 text-slate-100 min-h-screen`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-white text-tm-text min-h-screen`}
       >
         {/*
           DbRecoveryProvider fires POST /profiles/sync-recovery exactly once
@@ -38,9 +38,9 @@ export default function RootLayout({
         */}
         <DbRecoveryProvider />
 
-        <div className="flex h-screen w-screen overflow-hidden bg-slate-950">
+        <div className="flex h-screen w-screen overflow-hidden bg-white">
           <Sidebar />
-          <main className="flex-1 h-screen overflow-y-auto bg-slate-900/40 relative">
+          <main className="flex-1 h-screen overflow-y-auto bg-white relative flex flex-col">
             {children}
           </main>
         </div>

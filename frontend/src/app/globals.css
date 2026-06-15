@@ -1,50 +1,54 @@
+@import url('https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --background: #090d16;
-  --foreground: #f1f5f9;
+  --tm-border: rgba(0,0,0,0.08);
+  --tm-surface: #F9F9F8;
+  --tm-text: #1A1A1A;
+  --tm-muted: #6B7280;
+  --tm-accent: #1A1A1A;
+  --tm-success: #16A34A;
+  --tm-warning: #D97706;
+
+  --background: #FFFFFF;
+  --foreground: var(--tm-text);
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   overflow-x: hidden;
+  font-weight: 400;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* Restrict font weights to 400 and 500 */
+h1, h2, h3, h4, h5, h6, th, label, button, .font-medium {
+  font-weight: 500;
 }
 
-.animate-fade-in {
-  animation: fadeIn 0.3s ease-out forwards;
+h1, h2, h3, h4, h5, h6, th, label, button, .font-bold, .font-semibold {
+  font-weight: 500;
 }
 
-/* Custom scrollbars for a cohesive premium dark look */
+/* Custom Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #060814;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: rgba(0, 0, 0, 0.1);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: rgba(0, 0, 0, 0.2);
 }
-
