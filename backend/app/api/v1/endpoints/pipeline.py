@@ -79,6 +79,13 @@ async def upload_candidates(
             detail=f"Failed to read uploaded file: {exc}",
         ) from exc
 
+    MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500MB
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="File too large. Maximum size is 500MB.",
+        )
+
     async_result = submit_ranking_pipeline(job_id, file_bytes=contents, filename=filename)
     task_id: str = async_result.id
 

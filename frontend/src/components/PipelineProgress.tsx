@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 
 interface PipelineProgressProps {
   jobId: string | null;
@@ -22,6 +22,12 @@ export default function PipelineProgress({ jobId, taskId, onComplete }: Pipeline
 
   // If taskId is provided, use it, otherwise fall back to jobId
   const targetId = taskId || jobId;
+
+  // Use a ref to store the latest onComplete callback to avoid triggering useEffect when it changes
+  const onCompleteRef = useRef(onComplete);
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
 
   useEffect(() => {
     if (!targetId) {
@@ -48,7 +54,7 @@ export default function PipelineProgress({ jobId, taskId, onComplete }: Pipeline
 
         if (data.state === "SUCCESS") {
           eventSource.close();
-          if (onComplete) onComplete();
+          if (onCompleteRef.current) onCompleteRef.current();
         } else if (data.state === "FAILURE" || data.state === "REVOKED") {
           eventSource.close();
           setErrorMsg(data.detail || "Pipeline run failed");

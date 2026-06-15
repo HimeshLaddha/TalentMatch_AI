@@ -90,14 +90,14 @@ def test_normalize_yoe_fallback():
             {"title": "Role 2", "company": "Comp B", "years": 3.0}
         ]
     }
-    res = normalize(payload, b"dummy")
+    res = normalize(payload)
     assert res["profile"]["years_of_experience"] == 6  # 2.5 + 3.0 = 5.5 -> round to 6
 
     # If career_history is empty/missing yoe: default to 0
     payload_empty = {
         "name": "Bob"
     }
-    res_empty = normalize(payload_empty, b"dummy")
+    res_empty = normalize(payload_empty)
     assert res_empty["profile"]["years_of_experience"] == 0
 
 
@@ -133,3 +133,64 @@ def test_extract_with_llm_fallback_and_emergency_fallback(mock_settings):
         assert not res["candidate_id"].endswith("_FAILED")
         assert res["profile"]["name"] == "Test Candidate"
         assert res["profile"]["years_of_experience"] == 4
+
+
+def test_json_batch_returns_all_candidates():
+    """All candidates in a JSON array must be returned, not just the first."""
+    import json
+    from parsers.extractors import json_parser
+
+    batch = [
+        {
+            "candidate_id": f"TEST_{i:04d}",
+            "name": f"Candidate {i}",
+            "email": f"candidate{i}@test.com",
+            "current_title": "ML Engineer",
+            "years_of_experience": 6,
+            "skills": [],
+            "career_history": [],
+        }
+        for i in range(10)
+    ]
+    file_bytes = json.dumps(batch).encode("utf-8")
+    result = json_parser(file_bytes)
+
+    assert len(result) == 10, (
+        f"Expected 10 candidates from batch JSON, got {len(result)}"
+    )
+    ids = [c["candidate_id"] for c in result]
+    assert len(set(ids)) == 10, (
+        f"All candidate_ids must be unique. Got duplicates: {ids}"
+    )
+
+
+def test_json_single_object_returns_one_candidate():
+    """A single JSON object must return a list of exactly 1 candidate."""
+    import json
+    from parsers.extractors import json_parser
+
+    single = {
+        "name": "Jane Doe",
+        "email": "jane@test.com",
+        "current_title": "Data Scientist",
+        "years_of_experience": 5,
+        "skills": [],
+        "career_history": [],
+    }
+    file_bytes = json.dumps(single).encode("utf-8")
+    result = json_parser(file_bytes)
+
+    assert len(result) == 1, f"Expected 1 candidate, got {len(result)}"
+
+
+def test_json_batch_unique_ids_when_none_provided():
+    """Batch JSON without candidate_ids must get unique generated ids."""
+    import json
+    from parsers.extractors import json_parser
+
+    batch = [{"name": f"Person {i}", "current_title": "Engineer"} for i in range(5)]
+    file_bytes = json.dumps(batch).encode("utf-8")
+    result = json_parser(file_bytes)
+
+    ids = [c["candidate_id"] for c in result]
+    assert len(set(ids)) == 5, f"Expected 5 unique ids, got: {ids}"
