@@ -105,7 +105,7 @@ def parse_and_score(self, job_id: str, file_bytes: bytes, filename: str) -> dict
             exc,
         )
 
-    top_candidates = score_all(gz_path=gz_path, candidates=candidates)
+    top_candidates, all_candidates = score_all(gz_path=gz_path, candidates=candidates, return_all=True)
 
     logger.info(
         "parse_and_score[%s]: scored %d candidates (total scored: %d), returning top-%d",
@@ -115,9 +115,21 @@ def parse_and_score(self, job_id: str, file_bytes: bytes, filename: str) -> dict
         len(top_candidates),
     )
 
+    source = "unknown"
+    if filename.endswith(".jsonl.gz"):
+        source = "jsonl.gz"
+    elif filename.endswith(".json"):
+        source = "json"
+    elif filename.endswith(".pdf"):
+        source = "pdf"
+    elif filename.endswith(".docx"):
+        source = "docx"
+
     return {
         "job_id": job_id,
         "top_candidates": top_candidates,
+        "all_candidates": all_candidates,
+        "source": source,
         "start_time": start_time,
         "total_scored": total_scored,
     }
@@ -176,6 +188,8 @@ def generate_xai(self, parse_result: dict[str, Any]) -> dict[str, Any]:
     return {
         "job_id": job_id,
         "top_candidates": enriched,
+        "all_candidates": parse_result.get("all_candidates", []),
+        "source": parse_result.get("source", "unknown"),
         "xai_explanations": xai_explanations,
         "start_time": parse_result.get("start_time"),
         "total_scored": parse_result.get("total_scored"),
@@ -256,6 +270,7 @@ def write_output(self, xai_result: dict[str, Any]) -> dict[str, Any]:
         from app.api.v1.endpoints.profiles import get_mongo_db
         import asyncio
         from datetime import datetime, timezone
+        from pymongo import UpdateOne
 
         async def save_rankings():
             db = get_mongo_db()
@@ -285,6 +300,54 @@ def write_output(self, xai_result: dict[str, Any]) -> dict[str, Any]:
                 upsert=True
             )
             logger.info("write_output: saved job results to MongoDB rankings collection")
+
+            # Bulk upsert all candidates to "candidates" collection
+            run_at = datetime.now(timezone.utc).isoformat()
+            source = xai_result.get("source", "unknown")
+            all_scored_candidates = xai_result.get("all_candidates", [])
+            
+            collection = db["candidates"]
+            operations = []
+            for c in all_scored_candidates:
+                operations.append(
+                    UpdateOne(
+                        {"candidate_id": c["candidate_id"]},
+                        {
+                            "$set": {
+                                "candidate_id": c["candidate_id"],
+                                "name": c.get("name", ""),
+                                "email": c.get("email", ""),
+                                "current_title": c.get("current_title", ""),
+                                "years_of_experience": c.get("years_of_experience", 0),
+                                "skills": c.get("skills", []),
+                                "career_history": c.get("career_history", []),
+                                "redrob_signals": c.get("redrob_signals", {}),
+                                "last_score": c.get("score", 0.0),
+                                "last_rank": c.get("rank", 9999),
+                                "last_run_id": job_id,
+                                "last_seen": run_at,
+                                "upload_source": source,
+                            },
+                            "$push": {
+                                "run_history": {
+                                    "job_id": job_id,
+                                    "score": c.get("score", 0.0),
+                                    "rank": c.get("rank", 9999),
+                                    "run_at": run_at,
+                                }
+                            }
+                        },
+                        upsert=True
+                    )
+                )
+
+            if operations:
+                await collection.bulk_write(operations, ordered=False)
+                # Create indexes
+                await collection.create_index("candidate_id", unique=True)
+                await collection.create_index("last_score")
+                await collection.create_index("current_title")
+                logger.info("write_output: bulk upserted all candidates to candidates collection")
             
         asyncio.run(save_rankings())
     except Exception as exc:

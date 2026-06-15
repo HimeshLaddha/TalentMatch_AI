@@ -299,7 +299,7 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
 # ---------------------------------------------------------------------------
 # Public export: load + score all candidates from a gz_path
 # ---------------------------------------------------------------------------
-def score_all(gz_path: str = "", *, candidates: list[dict] | None = None) -> list[dict]:
+def score_all(gz_path: str = "", *, candidates: list[dict] | None = None, return_all: bool = False) -> list[dict] | tuple[list[dict], list[dict]]:
     """
     Scores and ranks candidates from either an in-memory list or a file path.
 
@@ -373,6 +373,11 @@ def score_all(gz_path: str = "", *, candidates: list[dict] | None = None) -> lis
         profile = cand.get("profile", {}) or {}
         yoe = float(profile.get("years_of_experience") or 0.0)
         current_title = profile.get("current_title", "")
+        name = profile.get("name") or profile.get("anonymized_name") or cand.get("name") or ""
+        email = profile.get("email") or cand.get("email") or ""
+        skills = cand.get("skills") or []
+        career_history = cand.get("career_history") or []
+        redrob_signals = cand.get("redrob_signals") or {}
         
         scored.append({
             "candidate_id": cid,
@@ -382,6 +387,11 @@ def score_all(gz_path: str = "", *, candidates: list[dict] | None = None) -> lis
             "xai": xai,
             "years_of_experience": int(round(yoe)) if yoe is not None else 0,
             "current_title": current_title,
+            "name": name,
+            "email": email,
+            "skills": skills,
+            "career_history": career_history,
+            "redrob_signals": redrob_signals,
             "_title_multiplier": cand.get("_title_multiplier", 1.0),
             "_duplicate_multiplier": cand.get("_duplicate_multiplier", 1.0),
             "_cred_multiplier": cand.get("_cred_multiplier", 1.0),
@@ -420,6 +430,8 @@ def score_all(gz_path: str = "", *, candidates: list[dict] | None = None) -> lis
     for rank, cand in enumerate(top_100, 1):
         cand["rank"] = rank
 
+    if return_all:
+        return top_100, scored
     return top_100
 
 

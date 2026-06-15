@@ -25,18 +25,12 @@ def jsonlgz_parser(file_bytes: bytes) -> List[Dict[str, Any]]:
     logger.info("jsonlgz_parser: parsed %d candidates", len(loaded))
     return loaded
 
-def normalize(obj: Dict[str, Any], file_bytes: bytes, index: int | None = None) -> Dict[str, Any]:
+def normalize(obj: Dict[str, Any]) -> Dict[str, Any]:
     """
     Maps incoming JSON keys (snake_case/camelCase/flat/nested) to the canonical schema.
     """
     # 1. candidate_id resolution
-    h = hashlib.sha256(file_bytes).hexdigest()[:8].upper()
-    cand_id = obj.get("candidate_id") or obj.get("candidateId")
-    if not cand_id:
-        if index is not None:
-            cand_id = f"UPLOAD_{h}_{index:04d}"
-        else:
-            cand_id = f"UPLOAD_{h}"
+    cand_id = obj.get("candidate_id") or obj.get("candidateId") or ""
 
     # Extract profile attributes from top-level or nested profile key
     sub_prof = obj.get("profile") if isinstance(obj.get("profile"), dict) else {}
@@ -167,14 +161,26 @@ def json_parser(file_bytes: bytes) -> List[Dict[str, Any]]:
     Parses a single candidate object or a list of candidate objects from raw JSON.
     """
     logger.info("json_parser: loading json bytes")
-    parsed_val = json.loads(file_bytes.decode("utf-8"))
-    
-    if isinstance(parsed_val, list):
-        return [normalize(c, file_bytes, idx) for idx, c in enumerate(parsed_val)]
-    elif isinstance(parsed_val, dict):
-        return [normalize(parsed_val, file_bytes)]
+    parsed = json.loads(file_bytes.decode("utf-8"))
+
+    # Normalise to list regardless of input shape
+    if isinstance(parsed, dict):
+        raw_list = [parsed]
+    elif isinstance(parsed, list):
+        raw_list = parsed
     else:
-        raise ValueError("JSON file content must be a list or a dictionary candidate object.")
+        raise ValueError(f"JSON must be an object or array, got {type(parsed)}")
+
+    candidates = []
+    for i, raw in enumerate(raw_list):
+        candidate = normalize(raw)
+        # Generate unique candidate_id per item in batch
+        if not candidate.get("candidate_id"):
+            file_hash = hashlib.sha256(file_bytes).hexdigest()[:8].upper()
+            candidate["candidate_id"] = f"UPLOAD_{file_hash}_{i:04d}"
+        candidates.append(candidate)
+
+    return candidates
 
 def make_failed_candidate(file_bytes: bytes) -> Dict[str, Any]:
     """Generates the fallback candidate on LLM failure."""
@@ -279,7 +285,11 @@ def extract_with_llm(raw_text: str, file_bytes: bytes) -> Dict[str, Any]:
             # Clean possible markdown formatting fences
             cleaned = re.sub(r"```(?:json)?\s*", "", raw_response).strip().rstrip("`").strip()
             parsed_json = json.loads(cleaned)
-            return normalize(parsed_json, file_bytes)
+            candidate = normalize(parsed_json)
+            if not candidate.get("candidate_id"):
+                file_hash = hashlib.sha256(file_bytes).hexdigest()[:8].upper()
+                candidate["candidate_id"] = f"UPLOAD_{file_hash}"
+            return candidate
         except Exception as e:
             logger.error("extract_with_llm: failed to parse response JSON: %s", e)
 
