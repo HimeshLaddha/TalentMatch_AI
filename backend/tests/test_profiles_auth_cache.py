@@ -49,15 +49,33 @@ class MockMongoCollection:
 
         return AsyncCursor(list(self.records.values()))
 
+    async def delete_many(self, query):
+        self.records.clear()
+        return MagicMock()
+
+    async def insert_many(self, documents):
+        for doc in documents:
+            doc_id = doc.get("candidate_id") or doc.get("id") or str(len(self.records))
+            self.records[doc_id] = doc
+        return MagicMock()
+
+
 
 class MockMongoDb:
     def __init__(self):
         self.raw_resumes = MockMongoCollection()
         self.profiles = MockMongoCollection()
+        self.leaderboards_collection = MockMongoCollection()
+
+    def __getattr__(self, name):
+        coll = MockMongoCollection()
+        setattr(self, name, coll)
+        return coll
 
 
 # Initialize mock database
 mock_db = MockMongoDb()
+
 
 
 # ---------------------------------------------------------------------------
@@ -231,3 +249,166 @@ def test_upload_resume_cache_and_mongo(mock_get_db):
 
     # Assert parser was NOT called again (short-circuited by cache hit)
     mock_parser.parse_candidate_profile.assert_not_called()
+
+
+@patch("app.api.v1.endpoints.profiles.get_mongo_db", return_value=mock_db)
+def test_bulk_json_upload(mock_get_db):
+    """
+    Test bulk upload of candidate profiles via .json file payload.
+    """
+    # Create a batch of candidate profiles
+    profiles = []
+    for i in range(15):
+        profile = get_test_candidate_profile()
+        profile.id = f"cand_bulk_{i}"
+        profiles.append(profile.model_dump())
+
+    import json
+    json_bytes = json.dumps(profiles).encode("utf-8")
+    file_payload = {"file": ("bulk_candidates.json", json_bytes, "application/json")}
+
+    # Reset mock call counts
+    mock_vector_store = app.dependency_overrides[get_vector_store_service]()
+    mock_vector_store.upsert_candidate.reset_mock()
+
+    response = client.post("/api/v1/profiles/upload", files=file_payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data.get("status") == "indexed"
+    assert data.get("total_archived_in_mongo") == 15
+    assert data.get("total_indexed_in_qdrant") == 15
+
+    # Check MongoDB was updated with all 15 records
+    assert len(mock_db.profiles.records) == 15
+    for i in range(15):
+        assert f"cand_bulk_{i}" in mock_db.profiles.records
+
+    # Assert Qdrant was called for all 15 profiles
+    assert mock_vector_store.upsert_candidate.call_count == 15
+
+
+@patch("app.api.v1.endpoints.profiles.get_mongo_db", return_value=mock_db)
+def test_bulk_json_upload_capped_qdrant(mock_get_db):
+    """
+    Test bulk upload with more than 500 candidate profiles.
+    Asserts Qdrant indexing is capped at 500, but MongoDB archives all of them.
+    """
+    # Create 550 candidate profiles
+    profiles = []
+    for i in range(550):
+        profile = get_test_candidate_profile()
+        profile.id = f"cand_bulk_{i}"
+        profiles.append(profile.model_dump())
+
+    import json
+    json_bytes = json.dumps(profiles).encode("utf-8")
+    file_payload = {"file": ("bulk_candidates_large.json", json_bytes, "application/json")}
+
+    # Reset mock call counts
+    mock_vector_store = app.dependency_overrides[get_vector_store_service]()
+    mock_vector_store.upsert_candidate.reset_mock()
+
+    response = client.post("/api/v1/profiles/upload", files=file_payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data.get("status") == "indexed"
+    assert data.get("total_archived_in_mongo") == 550
+    assert data.get("total_indexed_in_qdrant") == 500
+
+    # Check MongoDB has all 550 records
+    assert len(mock_db.profiles.records) == 550
+
+    # Assert Qdrant index count is capped at 500
+    assert mock_vector_store.upsert_candidate.call_count == 500
+
+
+@patch("app.api.v1.endpoints.profiles.get_mongo_db", return_value=mock_db)
+def test_evaluate_and_sync_endpoint(mock_get_db):
+    """
+    Test POST /profiles/evaluate-and-sync endpoint.
+    It should fetch all profiles from MongoDB, evaluate them, store them in leaderboards_collection,
+    and return the results under 'leaderboard'.
+    """
+    # 1. Populate mock profiles in DB
+    mock_db.profiles.records.clear()
+    mock_db.leaderboards_collection.records.clear()
+    
+    profile1 = get_test_candidate_profile()
+    profile1.id = "cand_test_01"
+    profile1.name = "Alice Developer"
+    profile1.career_history = [
+        CareerMilestone(
+            title="Senior AI Engineer",
+            company="AI Corp",
+            duration_months=72,
+            role_description="Built search engine with Python, PyTorch, and Qdrant."
+        )
+    ]
+    profile1.technical_skills = ["python", "pytorch", "qdrant", "llm"]
+    
+    mock_db.profiles.records[profile1.id] = profile1.model_dump()
+    
+    # Generate token
+    token_payload = {
+        "sub": "admin",
+        "role": "admin",
+        "exp": datetime.now(timezone.utc).timestamp() + 3600
+    }
+    token = jwt.encode(token_payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    # 2. Call evaluate-and-sync
+    response = client.post("/api/v1/profiles/evaluate-and-sync", headers=headers)
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["total_evaluated"] == 1
+    assert data["total_archived_in_mongo"] == 1
+    assert len(data["leaderboard"]) == 1
+    
+    cand_res = data["leaderboard"][0]
+    assert cand_res["candidate_id"] == "cand_test_01"
+    assert cand_res["name"] == "Alice Developer"
+    assert cand_res["current_title"] == "Senior AI Engineer"
+    assert cand_res["years_of_experience"] == 6
+    assert cand_res["final_score"] > 0.0
+    
+    # Check that it was persisted to leaderboards_collection
+    assert len(mock_db.leaderboards_collection.records) == 1
+    # MockMongoCollection uses filter_query key (doc_id) for internal storage
+    assert "cand_test_01" in mock_db.leaderboards_collection.records
+
+
+@patch("app.api.v1.endpoints.profiles.get_mongo_db", return_value=mock_db)
+def test_export_csv_endpoint(mock_get_db):
+    """
+    Test GET /profiles/export-csv endpoint.
+    It should retrieve candidates from leaderboards_collection and return a CSV.
+    """
+    mock_db.leaderboards_collection.records.clear()
+    
+    # Insert a dummy record in leaderboard collection
+    mock_db.leaderboards_collection.records["cand_test_01"] = {
+        "candidate_id": "cand_test_01",
+        "name": "Alice Developer",
+        "rank": 1,
+        "final_score": 0.85,
+        "reasoning": "Excellent fit"
+    }
+    
+    # Call export-csv without authentication headers (unsecured)
+    response = client.get("/api/v1/profiles/export-csv")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment; filename=submission.csv" in response.headers["content-disposition"]
+    
+    csv_text = response.text
+    lines = csv_text.strip().split("\r\n")
+    if len(lines) == 1:
+        lines = csv_text.strip().split("\n")
+    assert len(lines) == 2
+    assert lines[0] == "candidate_id,rank,score,reasoning"
+    assert lines[1] == "cand_test_01,1,0.85,Excellent fit"
+
+

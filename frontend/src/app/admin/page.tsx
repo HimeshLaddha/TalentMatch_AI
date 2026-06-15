@@ -9,6 +9,8 @@ import {
   CandidatesDirectoryResponse,
   loginAdmin,
   StoredCandidateSummary,
+  evaluateAndSync,
+  getExportCsvUrl,
 } from "@/lib/api";
 import { CandidateMatch, MatchResponse } from "@/types";
 
@@ -134,6 +136,22 @@ export default function AdminDashboard() {
       const directory = await getStoredCandidatesDirectory();
       setSyncState({ phase: "done", syncResult, directory });
       setDirectoryData(directory);
+
+      try {
+        const evalResult = await evaluateAndSync();
+        if (evalResult && evalResult.leaderboard) {
+          const matchResponse: MatchResponse = {
+            matches: evalResult.leaderboard,
+            total_scored: evalResult.total_evaluated
+          };
+          setMatchData(matchResponse);
+          if (evalResult.leaderboard.length > 0) {
+            setSelectedCandidate(evalResult.leaderboard[0]);
+          }
+        }
+      } catch (evalErr) {
+        console.error("Failed to run startup candidate evaluation:", evalErr);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error during sync.";
       setSyncState({ phase: "error", message });
@@ -466,11 +484,24 @@ export default function AdminDashboard() {
               </div>
 
               {adminTab === "matching" ? (
-                matchData && (
-                  <span className="text-xs text-tm-muted font-mono">
-                    Scored {matchData.total_scored} candidates
-                  </span>
-                )
+                <div className="flex items-center gap-3">
+                  {matchData && (
+                    <span className="text-xs text-tm-muted font-mono">
+                      Scored {matchData.total_scored} candidates
+                    </span>
+                  )}
+                  {matchData && matchData.matches && matchData.matches.length > 0 && (
+                    <button
+                      onClick={() => {
+                        window.open(getExportCsvUrl(), "_blank");
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[11px] font-medium border border-cyan-500/30 bg-cyan-950/10 hover:bg-cyan-500/20 text-cyan-400 hover:text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.15)] hover:shadow-[0_0_15px_rgba(6,182,212,0.3)] transition-all duration-300 font-mono"
+                    >
+                      <i className="ti ti-download text-xs" />
+                      EXPORT TO CSV
+                    </button>
+                  )}
+                </div>
               ) : (
                 directoryData && (
                   <span className="text-xs text-tm-muted font-mono">

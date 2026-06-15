@@ -1,69 +1,69 @@
 candidate_id,rank,score,reasoning
-CAND_0000031,1,0.3671,"**Rank #1: Ela Singh (CAND_0000031)**
+CAND_0000031,1,0.653,"**Rank #1: Ela Singh (CAND_0000031)**
 - Strongest Alignment: Matches 4 core AI skills (embeddings, retrieval, ranking, transformers) with a technical career track of 6.0 years of experience.
 - Competency Gaps: Lacks explicit skills in python, pytorch, llm.
 - Tailored Interview Prompts:
   1. Can you walk us through the system architecture of your most advanced retrieval or ranking system?
   2. How did you handle indexing latency or embedding drift in your previous roles?
   3. What evaluation frameworks (NDCG, MAP, etc.) did you design to validate ranking quality?"
-CAND_0000032,2,0.313,"**Rank #2: Pranav Agarwal (CAND_0000032)**
+CAND_0000032,2,0.6235,"**Rank #2: Pranav Agarwal (CAND_0000032)**
 - Strongest Alignment: Matches 3 core AI skills (python, rag, embeddings) with a technical career track of 8.0 years of experience.
 - Competency Gaps: Lacks explicit skills in pytorch, llm, retrieval.
 - Tailored Interview Prompts:
   1. Can you walk us through the system architecture of your most advanced retrieval or ranking system?
   2. How did you handle indexing latency or embedding drift in your previous roles?
   3. What evaluation frameworks (NDCG, MAP, etc.) did you design to validate ranking quality?"
-CAND_0000001,3,0.2941,"**Rank #3: Ira Vora (CAND_0000001)**
-- Strongest Alignment: Matches 3 core AI skills (python, llm, rag) with a technical career track of 7.0 years of experience.
-- Competency Gaps: Lacks explicit skills in pytorch, embeddings, retrieval.
+CAND_0000044,3,0.583,"**Rank #3: Vihaan Naidu (CAND_0000044)**
+- Strongest Alignment: Matches 2 core AI skills (python, rag) with a technical career track of 6.0 years of experience.
+- Competency Gaps: Lacks explicit skills in pytorch, llm, embeddings.
 - Tailored Interview Prompts:
   1. Can you walk us through the system architecture of your most advanced retrieval or ranking system?
   2. How did you handle indexing latency or embedding drift in your previous roles?
   3. What evaluation frameworks (NDCG, MAP, etc.) did you design to validate ranking quality?"
-CAND_0000015,4,0.2937,
-CAND_0000044,5,0.254,
-CAND_0000010,6,0.2364,
-CAND_0000027,7,0.2301,
-CAND_0000025,8,0.2071,
-CAND_0000014,9,0.2031,
-CAND_0000020,10,0.199,
-CAND_0000023,11,0.1905,
-CAND_0000035,12,0.1621,
-CAND_0000049,13,0.1536,
-CAND_0000016,14,0.1485,
-CAND_0000037,15,0.1468,
-CAND_0000039,16,0.1287,
-CAND_0000050,17,0.1198,
-CAND_0000036,18,0.1161,
-CAND_0000009,19,0.1111,
-CAND_0000043,20,0.0686,
-CAND_0000011,21,0.0558,
-CAND_0000038,22,0.0555,
-CAND_0000042,23,0.0552,
-CAND_0000018,24,0.0543,
-CAND_0000046,25,0.0536,
-CAND_0000048,26,0.0531,
-CAND_0000004,27,0.0455,
-CAND_0000007,28,0.0417,
-CAND_0000029,29,0.0377,
-CAND_0000006,30,0.0363,
-CAND_0000019,31,0.0358,
-CAND_0000041,32,0.0349,
-CAND_0000045,33,0.0277,
-CAND_0000017,34,0.0228,
-CAND_0000021,35,0.0139,
-CAND_0000013,36,0.0136,
-CAND_0000024,37,0.0105,
-CAND_0000030,38,0.0096,
-CAND_0000034,39,0.009,
-CAND_0000002,40,0.0071,
-CAND_0000047,41,0.0065,
-CAND_0000008,42,0.0062,
-CAND_0000005,43,0.0056,
-CAND_0000040,44,0.0046,
-CAND_0000003,45,0.0039,
-CAND_0000026,46,0.0029,
-CAND_0000028,47,0.0009,
-CAND_0000033,48,0.0005,
-CAND_0000012,49,0.0002,
+CAND_0000001,4,0.5815,
+CAND_0000015,5,0.5805,
+CAND_0000025,6,0.5695,
+CAND_0000014,7,0.5605,
+CAND_0000020,8,0.5515,
+CAND_0000010,9,0.544,
+CAND_0000016,10,0.53,
+CAND_0000023,11,0.4925,
+CAND_0000027,12,0.49,
+CAND_0000039,13,0.446,
+CAND_0000035,14,0.4295,
+CAND_0000036,15,0.398,
+CAND_0000009,16,0.387,
+CAND_0000049,17,0.3605,
+CAND_0000037,18,0.2855,
+CAND_0000050,19,0.2255,
+CAND_0000043,20,0.1581,
+CAND_0000038,21,0.1562,
+CAND_0000042,22,0.1556,
+CAND_0000018,23,0.1535,
+CAND_0000007,24,0.1527,
+CAND_0000046,25,0.152,
+CAND_0000029,26,0.1437,
+CAND_0000048,27,0.1418,
+CAND_0000006,28,0.1407,
+CAND_0000019,29,0.1395,
+CAND_0000004,30,0.122,
+CAND_0000045,31,0.0945,
+CAND_0000011,32,0.0936,
+CAND_0000017,33,0.0837,
+CAND_0000041,34,0.0653,
+CAND_0000013,35,0.0423,
+CAND_0000024,36,0.0288,
+CAND_0000030,37,0.0252,
+CAND_0000008,38,0.0218,
+CAND_0000005,39,0.0196,
+CAND_0000002,40,0.0168,
+CAND_0000034,41,0.0163,
+CAND_0000021,42,0.0152,
+CAND_0000040,43,0.0143,
+CAND_0000047,44,0.0139,
+CAND_0000003,45,0.0106,
+CAND_0000026,46,0.008,
+CAND_0000028,47,0.0027,
+CAND_0000033,48,0.002,
+CAND_0000012,49,0.0006,
 CAND_0000022,50,0.0,

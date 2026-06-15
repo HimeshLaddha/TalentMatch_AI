@@ -231,33 +231,9 @@ def write_output(self, xai_result: dict[str, Any]) -> dict[str, Any]:
         len(top_candidates),
     )
 
-    os.makedirs(_SUBMISSION_DIR, exist_ok=True)
-    output_path = os.path.join(_SUBMISSION_DIR, "submission.csv")
+    output_path = None
+    logger.info("write_output[%s]: skipped writing CSV to local disk", self.request.id)
 
-    try:
-        with open(output_path, "w", encoding="utf-8", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["candidate_id", "rank", "score", "reasoning"])
-            for cand in top_candidates:
-                writer.writerow(
-                    [
-                        cand["candidate_id"],
-                        cand["rank"],
-                        cand["score"],
-                        cand["reasoning"],
-                    ]
-                )
-    except OSError as exc:
-        logger.error(
-            "write_output[%s]: failed to write CSV — %s", self.request.id, exc
-        )
-        raise
-
-    logger.info(
-        "write_output[%s]: submission.csv written to %s",
-        self.request.id,
-        output_path,
-    )
 
     start_time = xai_result.get("start_time")
     runtime_seconds = int(time.time() - start_time) if start_time else 0

@@ -253,30 +253,8 @@ async def rerank_pipeline(payload: RerankRequest):
         else:
             cand["reasoning"] = ""
             
-    # Write to submission.csv in submission folder at root workspace
-    backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    root_dir = os.path.dirname(backend_dir)
-    submission_dir = os.path.join(root_dir, "submission")
-    os.makedirs(submission_dir, exist_ok=True)
-    output_path = os.path.join(submission_dir, "submission.csv")
-    
-    try:
-        with open(output_path, "w", encoding="utf-8", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["candidate_id", "rank", "score", "reasoning"])
-            for cand in top_100:
-                writer.writerow([
-                    cand["candidate_id"],
-                    cand["rank"],
-                    cand["score"],
-                    cand["reasoning"]
-                ])
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to write submission.csv: {exc}"
-        )
-        
+    # Writing submission.csv skipped to run purely in-memory
+
     # Save to MongoDB rankings collection
     try:
         db = get_mongo_db()
