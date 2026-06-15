@@ -231,3 +231,75 @@ def test_upload_resume_cache_and_mongo(mock_get_db):
 
     # Assert parser was NOT called again (short-circuited by cache hit)
     mock_parser.parse_candidate_profile.assert_not_called()
+
+
+@patch("app.api.v1.endpoints.profiles.get_mongo_db", return_value=mock_db)
+def test_bulk_json_upload(mock_get_db):
+    """
+    Test bulk upload of candidate profiles via .json file payload.
+    """
+    # Create a batch of candidate profiles
+    profiles = []
+    for i in range(15):
+        profile = get_test_candidate_profile()
+        profile.id = f"cand_bulk_{i}"
+        profiles.append(profile.model_dump())
+
+    import json
+    json_bytes = json.dumps(profiles).encode("utf-8")
+    file_payload = {"file": ("bulk_candidates.json", json_bytes, "application/json")}
+
+    # Reset mock call counts
+    mock_vector_store = app.dependency_overrides[get_vector_store_service]()
+    mock_vector_store.upsert_candidate.reset_mock()
+
+    response = client.post("/api/v1/profiles/upload", files=file_payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data.get("status") == "indexed"
+    assert data.get("total_archived_in_mongo") == 15
+    assert data.get("total_indexed_in_qdrant") == 15
+
+    # Check MongoDB was updated with all 15 records
+    assert len(mock_db.profiles.records) == 15
+    for i in range(15):
+        assert f"cand_bulk_{i}" in mock_db.profiles.records
+
+    # Assert Qdrant was called for all 15 profiles
+    assert mock_vector_store.upsert_candidate.call_count == 15
+
+
+@patch("app.api.v1.endpoints.profiles.get_mongo_db", return_value=mock_db)
+def test_bulk_json_upload_capped_qdrant(mock_get_db):
+    """
+    Test bulk upload with more than 500 candidate profiles.
+    Asserts Qdrant indexing is capped at 500, but MongoDB archives all of them.
+    """
+    # Create 550 candidate profiles
+    profiles = []
+    for i in range(550):
+        profile = get_test_candidate_profile()
+        profile.id = f"cand_bulk_{i}"
+        profiles.append(profile.model_dump())
+
+    import json
+    json_bytes = json.dumps(profiles).encode("utf-8")
+    file_payload = {"file": ("bulk_candidates_large.json", json_bytes, "application/json")}
+
+    # Reset mock call counts
+    mock_vector_store = app.dependency_overrides[get_vector_store_service]()
+    mock_vector_store.upsert_candidate.reset_mock()
+
+    response = client.post("/api/v1/profiles/upload", files=file_payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data.get("status") == "indexed"
+    assert data.get("total_archived_in_mongo") == 550
+    assert data.get("total_indexed_in_qdrant") == 500
+
+    # Check MongoDB has all 550 records
+    assert len(mock_db.profiles.records) == 550
+
+    # Assert Qdrant index count is capped at 500
+    assert mock_vector_store.upsert_candidate.call_count == 500
+

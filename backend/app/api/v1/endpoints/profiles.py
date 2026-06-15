@@ -1,10 +1,12 @@
 import json
 import os
 import logging
+import asyncio
 from pathlib import Path
 import uuid
 import hashlib
 from datetime import datetime, timezone
+from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Header
 from fastapi.responses import JSONResponse
 import io
@@ -337,7 +339,7 @@ def extract_text_from_docx(file_bytes: bytes) -> str:
 @router.post(
     "/upload",
     status_code=status.HTTP_201_CREATED,
-    summary="Ingest a candidate profile from a resume file",
+    summary="Ingest a candidate profile from a resume file or bulk JSON payload",
     response_description="Returns the structured profile and Qdrant index status.",
 )
 async def upload_resume_file(
@@ -347,33 +349,134 @@ async def upload_resume_file(
     vector_store: VectorStoreService = Depends(get_vector_store_service),
 ) -> JSONResponse:
     """
-    Ingests and vectorises a candidate profile directly from an uploaded resume file (.pdf, .docx, or .txt).
-    Checks MD5 cache footprint to short-circuit repetitive LLM parsing runs on duplicate file hits.
+    Ingests and vectorises candidate profiles. If a .json file is uploaded, parses 
+    and bulk-archives all candidate entries in MongoDB, while indexing the first 500 in Qdrant. 
+    Otherwise, processes a single resume file (.pdf, .docx, .txt).
     """
-    filename = file.filename or ""
-    lower_filename = filename.lower()
+    filename: str = file.filename or ""
+    lower_filename: str = filename.lower()
+    is_json: bool = lower_filename.endswith(".json")
 
-    if lower_filename.endswith(".doc") and not lower_filename.endswith(".docx"):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Legacy .doc format is not supported. Please convert your file to .docx or .pdf for automatic extraction.",
-        )
+    if not is_json:
+        if lower_filename.endswith(".doc") and not lower_filename.endswith(".docx"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Legacy .doc format is not supported. Please convert your file to .docx or .pdf for automatic extraction.",
+            )
 
-    if not (lower_filename.endswith(".pdf") or lower_filename.endswith(".docx") or lower_filename.endswith(".txt") or lower_filename.endswith(".json")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported file extension. Only .pdf, .docx, .txt, and .json files are supported.",
-        )
+        if not (lower_filename.endswith(".pdf") or lower_filename.endswith(".docx") or lower_filename.endswith(".txt")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported file extension. Only .pdf, .docx, .txt, and .json files are supported.",
+            )
 
     try:
-        contents = await file.read()
+        contents: bytes = await file.read()
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Could not read uploaded file: {str(e)}",
         )
 
-    # 1. Compute MD5 checksum to check cache footprint
+    # If it is a .json bulk payload
+    if is_json:
+        try:
+            raw_data = json.loads(contents)
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid JSON file format: {str(e)}"
+            )
+
+        if isinstance(raw_data, list):
+            profiles_list = raw_data
+        elif isinstance(raw_data, dict):
+            if "profiles" in raw_data:
+                profiles_list = raw_data["profiles"]
+            elif "candidates" in raw_data:
+                profiles_list = raw_data["candidates"]
+            else:
+                profiles_list = [raw_data]
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="JSON payload must be a list of candidate profiles or an object containing a list."
+            )
+
+        candidates: list[CandidateProfile] = []
+        for p in profiles_list:
+            try:
+                candidate = CandidateProfile.model_validate(p)
+                candidates.append(candidate)
+            except Exception as val_err:
+                logger.error(f"Profile schema validation failed: {val_err}")
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Schema validation failed for a candidate profile in the list: {str(val_err)}"
+                )
+
+        if not candidates:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The JSON file contains no valid candidate profiles."
+            )
+
+        db = get_mongo_db()
+        profiles_collection = db.profiles
+        md5_hash: str = hashlib.md5(contents).hexdigest()
+
+        # 2. Asynchronously upsert all candidates in MongoDB with a concurrency limit
+        mongo_sem = asyncio.Semaphore(100)
+        async def upsert_mongo(cand: CandidateProfile) -> None:
+            async with mongo_sem:
+                cand_data = cand.model_dump()
+                cand_data["stored_at"] = datetime.now(timezone.utc).isoformat()
+                cand_data["profile_path"] = filename
+                cand_data["md5_hash"] = md5_hash
+                await profiles_collection.update_one(
+                    {"id": cand.id},
+                    {"$set": cand_data},
+                    upsert=True
+                )
+
+        mongo_tasks = [upsert_mongo(c) for c in candidates]
+        try:
+            await asyncio.gather(*mongo_tasks)
+        except Exception as exc:
+            logger.error(f"Failed during bulk MongoDB upserts: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"MongoDB Atlas candidate profile upsert failed: {str(exc)}"
+            )
+
+        # 3. Index the first 500 profiles into Qdrant with a concurrency limit to prevent API rate-limit exhaustion
+        qdrant_sem = asyncio.Semaphore(10)
+        async def upsert_qdrant(cand: CandidateProfile) -> None:
+            async with qdrant_sem:
+                await vector_store.upsert_candidate(cand, embedder)
+
+        qdrant_tasks = [upsert_qdrant(c) for c in candidates[:500]]
+        try:
+            await asyncio.gather(*qdrant_tasks)
+        except Exception as exc:
+            logger.error(f"Failed during bulk Qdrant indexing: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Qdrant vector indexing failed: {str(exc)}"
+            )
+
+        # 4. Return total_archived_in_mongo matching true total data dimensions
+        return JSONResponse(
+            status_code=status.HTTP_201_CREATED,
+            content={
+                "status": "indexed",
+                "total_archived_in_mongo": len(candidates),
+                "total_indexed_in_qdrant": min(len(candidates), 500),
+                "cached": False,
+            }
+        )
+
+    # 1. Compute MD5 checksum to check cache footprint for a single resume
     md5_hash = hashlib.md5(contents).hexdigest()
     if md5_hash in RESUME_EXTRACTION_CACHE:
         logger.info(f"Resume extraction cache HIT for MD5: {md5_hash}")
