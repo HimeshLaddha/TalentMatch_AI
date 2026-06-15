@@ -154,3 +154,110 @@ def test_duplicate_candidates_deduplicated(scored_candidates: list[dict]) -> Non
         f"Expected DUPLICATE_A (rank {dup_a['rank']}) to rank above "
         f"DUPLICATE_B (rank {dup_b['rank']}) via lexicographic tie-breaking."
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 6: CTO substring bug is fixed
+# ---------------------------------------------------------------------------
+def test_cto_substring_bug_is_fixed(scored_candidates: list[dict]) -> None:
+    """
+    "Sales Director" must not match the tech title check because 'cto' is a
+    substring but not a standalone word. We verify that "CTO_SUBSTRING_FAIL"
+    (Sales Director) is not in the top 10 results.
+    We also verify that "CTO_STANDALONE" (which has standalone "CTO" title)
+    passes the tech title check and is scored normally.
+    """
+    top_10_ids = {c["candidate_id"] for c in scored_candidates[:10]}
+    
+    assert "CTO_SUBSTRING_FAIL" not in top_10_ids, (
+        "CTO substring bug still exists. 'Sales Director' matched engineering title tokens list."
+    )
+    
+    # Assert that CTO_STANDALONE ranked higher because it passed title checks, while substring fail did not
+    results_by_id = {c["candidate_id"]: c for c in scored_candidates}
+    cto_fail = results_by_id.get("CTO_SUBSTRING_FAIL")
+    cto_pass = results_by_id.get("CTO_STANDALONE")
+    
+    assert cto_fail is not None
+    assert cto_pass is not None
+    assert cto_pass["score"] > cto_fail["score"], (
+        f"Standalone CTO should rank higher than CTO substring mismatch (Sales Director). "
+        f"Scores: CTO={cto_pass['score']}, Sales Director={cto_fail['score']}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 7: Credential inflation is penalized
+# ---------------------------------------------------------------------------
+def test_credential_inflation_penalized(scored_candidates: list[dict]) -> None:
+    """
+    "Principal Engineer" with yoe=3 must be penalized (inflation multiplier 0.45)
+    and rank below a valid "Senior Engineer" with yoe=6.
+    """
+    results_by_id = {c["candidate_id"]: c for c in scored_candidates}
+    
+    principal = results_by_id.get("INFLATED_PRINCIPAL")
+    senior = results_by_id.get("VALID_SENIOR")
+    
+    assert principal is not None, "INFLATED_PRINCIPAL candidate not found."
+    assert senior is not None, "VALID_SENIOR candidate not found."
+    
+    assert senior["rank"] < principal["rank"], (
+        f"Expected Senior Engineer (rank {senior['rank']}) to rank above "
+        f"inflated Principal Engineer (rank {principal['rank']})."
+    )
+    assert principal["score"] < senior["score"], (
+        f"Expected inflated Principal Engineer to have lower score due to penalty. "
+        f"Principal score: {principal['score']}, Senior score: {senior['score']}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 8: Fuzzy duplicates excluded
+# ---------------------------------------------------------------------------
+def test_fuzzy_duplicate_excluded(scored_candidates: list[dict]) -> None:
+    """
+    If two candidates share identical name, email, and phone,
+    the fuzzy duplicate identity guard should mark the second as a duplicate,
+    resulting in a multiplier of 0.0, thus removing it from top-ranking candidates.
+    """
+    results_by_id = {c["candidate_id"]: c for c in scored_candidates}
+    
+    first = results_by_id.get("FUZZY_DUP_1")
+    second = results_by_id.get("FUZZY_DUP_2")
+    
+    assert first is not None, "FUZZY_DUP_1 candidate not found."
+    assert second is not None, "FUZZY_DUP_2 candidate not found."
+    
+    assert first["score"] > 0.0, "First candidate of duplicate pair should have a positive score."
+    assert second["score"] == 0.0, (
+        f"Expected second candidate of duplicate pair to have 0.0 score. "
+        f"Got: {second['score']}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 9: Skill recency boosts recent profiles
+# ---------------------------------------------------------------------------
+def test_skill_recency_boosts_recent_profiles(scored_candidates: list[dict]) -> None:
+    """
+    Two identical candidates with skills last used in 2019 vs 2025.
+    The candidate with the 2025 skills should rank higher (smaller rank number)
+    and have a higher score due to less recency decay.
+    """
+    results_by_id = {c["candidate_id"]: c for c in scored_candidates}
+    
+    old_skills = results_by_id.get("RECENCY_OLD")
+    new_skills = results_by_id.get("RECENCY_NEW")
+    
+    assert old_skills is not None, "RECENCY_OLD candidate not found."
+    assert new_skills is not None, "RECENCY_NEW candidate not found."
+    
+    assert new_skills["score"] > old_skills["score"], (
+        f"Expected recent profile (2025 last used) to score higher than older profile (2019 last used). "
+        f"New score: {new_skills['score']}, Old score: {old_skills['score']}"
+    )
+    assert new_skills["rank"] < old_skills["rank"], (
+        f"Expected recent profile to have a higher rank. "
+        f"New rank: {new_skills['rank']}, Old rank: {old_skills['rank']}"
+    )

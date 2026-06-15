@@ -66,7 +66,7 @@ def test_upload_endpoint_returns_queued_immediately(
 
     monkeypatch.setattr(
         "app.api.v1.endpoints.pipeline.submit_ranking_pipeline",
-        lambda job_id, gz_path: mock_async_result,
+        lambda job_id, file_bytes, filename: mock_async_result,
     )
 
     # Also mock os.makedirs and open so we don't write temp files
@@ -137,6 +137,7 @@ def test_status_endpoint_streams_sse(
     """
     mock_result = MagicMock()
     mock_result.state = "SUCCESS"
+    mock_result.parent = None
     mock_result.result = {"output_path": "/tmp/submission.csv", "status": "complete"}
 
     monkeypatch.setattr(

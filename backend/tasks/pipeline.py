@@ -18,6 +18,9 @@ import logging
 import os
 import sys
 import tempfile
+import time
+import gzip
+import json
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +29,8 @@ from celery import chain
 # Add the backend root to sys.path so `import extract_challenge` works both
 # when running the worker from the repo root and from inside Docker.
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _BACKEND_DIR not in sys.path:
+_norm_backend = os.path.normcase(_BACKEND_DIR)
+if not any(os.path.normcase(p) == _norm_backend for p in sys.path):
     sys.path.insert(0, _BACKEND_DIR)
 
 from extract_challenge import call_llm_xai, score_all  # noqa: E402
@@ -51,14 +55,15 @@ _SUBMISSION_DIR = os.path.join(_ROOT_DIR, "submission")
     default_retry_delay=5,
     autoretry_for=(Exception,),
 )
-def parse_and_score(self, job_id: str, gz_path: str) -> dict[str, Any]:
+def parse_and_score(self, job_id: str, file_bytes: bytes, filename: str) -> dict[str, Any]:
     """
-    Streams candidates.jsonl.gz, applies heuristic scoring via
-    extract_challenge.score_all(), and returns the top-100 ranked list.
+    Parses a candidate file (PDF, DOCX, JSON, or JSONL.GZ) to candidate dicts,
+    applies heuristic scoring, and returns the top-100 ranked list.
 
     Args:
         job_id:  Opaque identifier for this pipeline run (stored in result).
-        gz_path: Absolute path to the .jsonl.gz candidate file.
+        file_bytes: The raw bytes of the uploaded candidate file.
+        filename: The filename of the uploaded candidate file.
 
     Returns:
         {
@@ -67,26 +72,54 @@ def parse_and_score(self, job_id: str, gz_path: str) -> dict[str, Any]:
         }
     """
     logger.info(
-        "parse_and_score[%s]: starting — gz_path=%s", self.request.id, gz_path
+        "parse_and_score[%s]: starting — filename=%s, size=%d bytes",
+        self.request.id,
+        filename,
+        len(file_bytes),
     )
 
-    if not os.path.exists(gz_path):
-        raise FileNotFoundError(
-            f"parse_and_score: candidate file not found: {gz_path}"
+    start_time = time.time()
+    try:
+        _norm_backend = os.path.normcase(_BACKEND_DIR)
+        if not any(os.path.normcase(p) == _norm_backend for p in sys.path):
+            sys.path.insert(0, _BACKEND_DIR)
+        from parsers.format_router import route_file
+        candidates = route_file(file_bytes, filename)
+        total_scored = len(candidates)
+    except Exception as e:
+        logger.error("parse_and_score: failed to route and parse candidate file — %s", e)
+        raise
+
+    # Determine job directory in temp folder to save parsed candidates/scores
+    job_dir = os.path.join(tempfile.gettempdir(), "talentmatch", job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    gz_path = os.path.join(job_dir, filename)
+
+    try:
+        with open(gz_path, "wb") as fh:
+            fh.write(file_bytes)
+    except OSError as exc:
+        logger.warning(
+            "parse_and_score[%s]: failed to write file to temp path — %s",
+            self.request.id,
+            exc,
         )
 
-    top_candidates = score_all(gz_path)
+    top_candidates = score_all(gz_path=gz_path, candidates=candidates)
 
     logger.info(
-        "parse_and_score[%s]: scored %d candidates, returning top-%d",
+        "parse_and_score[%s]: scored %d candidates (total scored: %d), returning top-%d",
         self.request.id,
         len(top_candidates),
+        total_scored,
         len(top_candidates),
     )
 
     return {
         "job_id": job_id,
         "top_candidates": top_candidates,
+        "start_time": start_time,
+        "total_scored": total_scored,
     }
 
 
@@ -144,6 +177,8 @@ def generate_xai(self, parse_result: dict[str, Any]) -> dict[str, Any]:
         "job_id": job_id,
         "top_candidates": enriched,
         "xai_explanations": xai_explanations,
+        "start_time": parse_result.get("start_time"),
+        "total_scored": parse_result.get("total_scored"),
     }
 
 
@@ -210,6 +245,53 @@ def write_output(self, xai_result: dict[str, Any]) -> dict[str, Any]:
         output_path,
     )
 
+    start_time = xai_result.get("start_time")
+    runtime_seconds = int(time.time() - start_time) if start_time else 0
+    total_scored = xai_result.get("total_scored") or len(top_candidates)
+
+    try:
+        _norm_backend = os.path.normcase(_BACKEND_DIR)
+        if not any(os.path.normcase(p) == _norm_backend for p in sys.path):
+            sys.path.insert(0, _BACKEND_DIR)
+        from app.api.v1.endpoints.profiles import get_mongo_db
+        import asyncio
+        from datetime import datetime, timezone
+
+        async def save_rankings():
+            db = get_mongo_db()
+            
+            candidates_data = []
+            for cand in top_candidates:
+                candidates_data.append({
+                    "candidate_id": cand["candidate_id"],
+                    "rank": cand["rank"],
+                    "score": cand["score"],
+                    "reasoning": cand.get("reasoning", "") if cand.get("rank", 999) <= 3 else "",
+                    "years_of_experience": cand.get("years_of_experience", 0),
+                    "current_title": cand.get("current_title", "")
+                })
+                
+            doc = {
+                "job_id": job_id,
+                "run_at": datetime.now(timezone.utc).isoformat(),
+                "total_scored": total_scored,
+                "runtime_seconds": runtime_seconds,
+                "candidates": candidates_data
+            }
+            
+            await db.rankings.update_one(
+                {"job_id": job_id},
+                {"$set": doc},
+                upsert=True
+            )
+            logger.info("write_output: saved job results to MongoDB rankings collection")
+            
+        asyncio.run(save_rankings())
+    except Exception as exc:
+        logger.error(
+            "write_output[%s]: failed to write to MongoDB rankings — %s", self.request.id, exc
+        )
+
     return {
         "job_id": job_id,
         "output_path": output_path,
@@ -220,21 +302,21 @@ def write_output(self, xai_result: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Chain factory
 # ---------------------------------------------------------------------------
-def submit_ranking_pipeline(job_id: str, gz_path: str):
+def submit_ranking_pipeline(job_id: str, file_bytes: bytes, filename: str):
     """
     Dispatches the full ranking pipeline as a Celery chain.
     Returns a Celery AsyncResult immediately (non-blocking).
 
     Usage::
 
-        result = submit_ranking_pipeline("job_abc", "/tmp/talentmatch/job_abc/candidates.jsonl.gz")
+        result = submit_ranking_pipeline("job_abc", file_bytes, "candidates.jsonl.gz")
         task_id = result.id   # pass to GET /api/v1/pipeline/status/{task_id}
 
     The chain executes tasks in order:
         parse_and_score  →  generate_xai  →  write_output
     """
     return chain(
-        parse_and_score.s(job_id, gz_path),
+        parse_and_score.s(job_id, file_bytes, filename),
         generate_xai.s(),
         write_output.s(),
     ).apply_async()

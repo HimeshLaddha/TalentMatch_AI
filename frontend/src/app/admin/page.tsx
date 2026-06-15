@@ -23,8 +23,7 @@ type SyncState =
   | { phase: "error"; message: string };
 
 // ---------------------------------------------------------------------------
-// StorageStatusBadge – declared at module level so React never treats it as a
-// new component type on parent re-renders (avoids unnecessary unmount/remount).
+// StorageStatusBadge – Light Notion/Stripe style
 // ---------------------------------------------------------------------------
 
 function StorageStatusBadge({ syncState }: { syncState: SyncState }) {
@@ -33,10 +32,10 @@ function StorageStatusBadge({ syncState }: { syncState: SyncState }) {
   if (syncState.phase === "syncing") {
     return (
       <div
-        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-700 text-xs text-slate-400 font-mono animate-pulse"
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-tm-surface border border-tm-border text-[11px] text-tm-muted font-mono"
         title="Synchronising in-memory vector database with disk storage…"
       >
-        <span className="h-2 w-2 rounded-full bg-amber-500 animate-ping" />
+        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
         Syncing Storage…
       </div>
     );
@@ -45,63 +44,52 @@ function StorageStatusBadge({ syncState }: { syncState: SyncState }) {
   if (syncState.phase === "error") {
     return (
       <div
-        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-rose-955/30 border border-rose-700/40 text-xs text-rose-400 font-mono cursor-default"
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-50 border border-rose-100 text-[11px] text-rose-600 font-mono cursor-default"
         title={`Storage sync failed: ${syncState.message}`}
       >
-        <span className="h-2 w-2 rounded-full bg-rose-500" />
-        Storage Sync Failed
+        <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+        Sync Failed
       </div>
     );
   }
 
-  // phase === "done"
   const { directory, syncResult } = syncState;
   const count = directory.total_stored;
   const isPartial = syncResult.status === "partial" || syncResult.failed > 0;
 
   return (
     <div
-      className={`group flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-mono cursor-default transition-all duration-200 ${
+      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-mono cursor-default transition-colors ${
         isPartial
-          ? "bg-amber-950/20 border-amber-700/40 text-amber-400 hover:bg-amber-950/30"
+          ? "bg-amber-50 border-amber-200 text-amber-700"
           : count === 0
-          ? "bg-slate-900 border-slate-700 text-slate-400"
-          : "bg-emerald-950/20 border-emerald-700/40 text-emerald-400 hover:bg-emerald-950/30"
+          ? "bg-tm-surface border-tm-border text-tm-muted"
+          : "bg-emerald-50 border-emerald-100 text-emerald-700"
       }`}
       title={
         count === 0
           ? "No profiles persisted in disk storage yet."
-          : `${syncResult.synced} of ${syncResult.total_found} profile(s) re-indexed into Qdrant. Storage path: ${directory.storage_path}`
+          : `${syncResult.synced} of ${syncResult.total_found} profile(s) re-indexed. Storage path: ${directory.storage_path}`
       }
     >
-      {/* Pulse dot */}
       <span
-        className={`h-2 w-2 rounded-full shrink-0 ${
+        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
           isPartial
             ? "bg-amber-500"
             : count === 0
-            ? "bg-slate-500"
-            : "bg-emerald-500"
+            ? "bg-neutral-400"
+            : "bg-tm-success"
         }`}
       />
-
-      {/* Label */}
       {count === 0 ? (
-        <span>Active Data Directory: Empty</span>
+        <span>Directory: Empty</span>
       ) : (
         <span>
-          Active Data Directory:&nbsp;
-          <span className="font-bold">{count}</span>&nbsp;Verified Candidate
-          {count === 1 ? " Profile" : " Profiles"} Loaded
+          Directory: <span className="font-medium">{count}</span> Loaded
         </span>
       )}
-
-      {/* Partial-failure indicator */}
       {isPartial && (
-        <span
-          className="ml-1 px-1 py-0.5 rounded bg-amber-700/30 text-amber-300 text-[10px]"
-          title={`${syncResult.failed} profile(s) failed to re-index.`}
-        >
+        <span className="ml-1 px-1 py-0.2 bg-amber-200 text-amber-800 text-[9px] rounded">
           {syncResult.failed} err
         </span>
       )}
@@ -110,9 +98,6 @@ function StorageStatusBadge({ syncState }: { syncState: SyncState }) {
 }
 
 export default function AdminDashboard() {
-  // -------------------------------------------------------------------------
-  // Authentication & Directory States
-  // -------------------------------------------------------------------------
   const [token, setToken] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [password, setPassword] = useState("");
@@ -123,69 +108,42 @@ export default function AdminDashboard() {
   const [directoryData, setDirectoryData] = useState<CandidatesDirectoryResponse | null>(null);
   const [selectedDirectoryCandidate, setSelectedDirectoryCandidate] = useState<StoredCandidateSummary | null>(null);
 
-  // -------------------------------------------------------------------------
-  // Job-description form state
-  // -------------------------------------------------------------------------
   const [title, setTitle] = useState("");
   const [domain, setDomain] = useState("");
   const [rawText, setRawText] = useState("");
 
-  // -------------------------------------------------------------------------
-  // Matching pipeline UI state
-  // -------------------------------------------------------------------------
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [matchData, setMatchData] = useState<MatchResponse | null>(null);
-  const [selectedCandidate, setSelectedCandidate] =
-    useState<CandidateMatch | null>(null);
+  const [selectedCandidate, setSelectedCandidate] = useState<CandidateMatch | null>(null);
 
-  // Tab / accordion selection for the XAI detail panel
-  const [activeDetailTab, setActiveDetailTab] = useState<
-    "all" | "fit" | "gaps" | "prompts"
-  >("all");
-
-  // -------------------------------------------------------------------------
-  // Storage recovery sync state
-  // -------------------------------------------------------------------------
+  const [activeDetailTab, setActiveDetailTab] = useState<"all" | "fit" | "gaps" | "prompts">("all");
   const [syncState, setSyncState] = useState<SyncState>({ phase: "idle" });
 
-  // -------------------------------------------------------------------------
-  // Initialize token from localStorage
-  // -------------------------------------------------------------------------
   useEffect(() => {
     const storedToken = localStorage.getItem("token");
     setToken(storedToken);
     setIsInitialized(true);
   }, []);
 
-  /**
-   * Sync-recovery and directory fetching logic
-   */
   const runStartupSync = useCallback(async () => {
     setSyncState({ phase: "syncing" });
 
     try {
-      // Fire sync-recovery first so Qdrant is healed before any user query
       const syncResult = await triggerDatabaseRecoverySync();
-
-      // Then fetch the directory for the badge count
       const directory = await getStoredCandidatesDirectory();
-
       setSyncState({ phase: "done", syncResult, directory });
       setDirectoryData(directory);
     } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : "Unknown error during startup sync.";
+      const message = err instanceof Error ? err.message : "Unknown error during sync.";
       setSyncState({ phase: "error", message });
 
-      // If authorized token fails or expires, trigger logout to lock screen
       if (
         message.includes("401") ||
         message.includes("Unauthorized") ||
         message.includes("forbidden") ||
-        message.includes("ExpiredSignatureError")
+        message.includes("ExpiredSignatureError") ||
+        message.toLowerCase().includes("token")
       ) {
         localStorage.removeItem("token");
         setToken(null);
@@ -214,10 +172,6 @@ export default function AdminDashboard() {
     }
   }, []);
 
-  // -------------------------------------------------------------------------
-  // Matching pipeline handlers
-  // -------------------------------------------------------------------------
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !rawText.trim()) {
@@ -241,10 +195,7 @@ export default function AdminDashboard() {
         setSelectedCandidate(response.matches[0]);
       }
     } catch (err) {
-      const errMsg =
-        err instanceof Error
-          ? err.message
-          : "Failed to process matching pipeline. Please verify the backend is active.";
+      const errMsg = err instanceof Error ? err.message : "Failed to process matching pipeline.";
       setError(errMsg);
       setMatchData(null);
     } finally {
@@ -261,9 +212,7 @@ export default function AdminDashboard() {
       localStorage.setItem("token", response.token);
       setToken(response.token);
     } catch (err) {
-      setLoginError(
-        err instanceof Error ? err.message : "Failed to authenticate. Access denied."
-      );
+      setLoginError(err instanceof Error ? err.message : "Failed to authenticate. Access denied.");
     } finally {
       setIsSubmitting(false);
     }
@@ -279,10 +228,6 @@ export default function AdminDashboard() {
     setSyncState({ phase: "idle" });
   };
 
-  // -------------------------------------------------------------------------
-  // Score display helpers
-  // -------------------------------------------------------------------------
-
   const formatScore = (val: number): string => {
     const scale = val <= 1.0 ? 100 : 1;
     return `${Math.round(val * scale)}`;
@@ -290,61 +235,41 @@ export default function AdminDashboard() {
 
   const getScoreColorClass = (scoreStr: string): string => {
     const score = parseInt(scoreStr, 10);
-    if (score >= 85) return "text-emerald-400 bg-emerald-500/10 border-emerald-500/30";
-    if (score >= 70) return "text-sky-400 bg-sky-500/10 border-sky-500/30";
-    if (score >= 50) return "text-amber-400 bg-amber-500/10 border-amber-500/30";
-    return "text-rose-400 bg-rose-500/10 border-rose-500/30";
+    if (score >= 85) return "text-emerald-700 bg-emerald-50 border-emerald-100";
+    if (score >= 70) return "text-sky-700 bg-sky-50 border-sky-100";
+    if (score >= 50) return "text-amber-700 bg-amber-50 border-amber-150";
+    return "text-rose-700 bg-rose-50 border-rose-100";
   };
 
-  // -------------------------------------------------------------------------
-  // Locked screen and rendering
-  // -------------------------------------------------------------------------
   if (!isInitialized) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="animate-spin h-8 w-8 text-indigo-500" />
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <i className="ti ti-loader text-lg text-tm-muted animate-spin" />
       </div>
     );
   }
 
   if (!token) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
-        {/* Decorative background glows */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-[120px] pointer-events-none" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-[120px] pointer-events-none" />
-
-        <div className="w-full max-w-md bg-slate-900/60 border border-slate-800/80 rounded-2xl p-8 shadow-2xl backdrop-blur-xl animate-fade-in relative z-10">
-          <div className="text-center space-y-3 mb-8">
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400">
-              <svg
-                className="w-6 h-6"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
-                />
-              </svg>
+      <div className="min-h-screen bg-tm-surface flex items-center justify-center p-4">
+        <div className="w-full max-w-sm bg-white border border-tm-border rounded-[12px] p-6">
+          <div className="text-center space-y-2 mb-6">
+            <div className="inline-flex items-center justify-center w-10 h-10 rounded-[8px] bg-tm-surface border border-tm-border text-tm-text">
+              <i className="ti ti-lock text-lg" />
             </div>
-            <h1 className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+            <h1 className="text-base font-medium text-tm-text">
               Access Restricted
             </h1>
-            <p className="text-slate-400 text-xs">
+            <p className="text-tm-muted text-xs">
               Administrative credentials are required to view candidate records.
             </p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-5">
+          <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label
                 htmlFor="admin-password"
-                className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5"
+                className="block text-xs text-tm-muted mb-1 font-medium"
               >
                 Administrative Passphrase
               </label>
@@ -353,14 +278,14 @@ export default function AdminDashboard() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter admin passphrase"
-                className="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-650 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors"
+                placeholder="Enter passphrase"
+                className="w-full bg-white border border-tm-border rounded-[8px] px-3 py-2 text-xs text-tm-text placeholder-gray-400 focus:outline-none focus:border-tm-accent"
                 required
               />
             </div>
 
             {loginError && (
-              <div className="bg-rose-950/20 border border-rose-500/30 rounded-xl p-3 text-rose-450 text-xs">
+              <div className="bg-rose-50 border border-rose-100 rounded-[8px] p-2.5 text-rose-700 text-xs font-medium">
                 {loginError}
               </div>
             )}
@@ -368,10 +293,10 @@ export default function AdminDashboard() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full flex items-center justify-center gap-2 rounded-xl py-3 px-4 font-semibold text-sm bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/25 hover:shadow-indigo-500/35 border border-indigo-500/30 transition-all duration-300 hover:scale-[1.01]"
+              className="w-full flex items-center justify-center gap-1.5 rounded-[8px] py-2 px-3 text-xs bg-tm-accent hover:bg-neutral-800 text-white font-medium transition-colors"
             >
               {isSubmitting ? (
-                <div className="h-5 w-5 border-2 border-indigo-250 border-t-transparent rounded-full animate-spin" />
+                <i className="ti ti-loader text-sm animate-spin" />
               ) : (
                 "Authorize Access"
               )}
@@ -383,84 +308,50 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-8 animate-fade-in">
-      {/* ------------------------------------------------------------------ */}
-      {/* Header Banner                                                        */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-800 pb-6">
+    <div className="p-8 max-w-7xl mx-auto space-y-6">
+      {/* Header Banner */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-tm-border pb-5">
         <div>
-          <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+          <h1 className="text-xl font-medium text-tm-text">
             Recruitment Dashboard
           </h1>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-tm-muted text-xs mt-1">
             Analyze unstructured job descriptions and match them with MongoDB cloud-indexed candidates.
           </p>
         </div>
 
-        {/* Right-side badges row */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 flex-wrap">
-          {/* Storage status badge – renders after first sync */}
+        <div className="flex items-center gap-2 flex-wrap text-xs">
           <StorageStatusBadge syncState={syncState} />
 
-          {/* Always-visible retrieval active badge */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900 border border-slate-800 text-xs text-slate-400 font-mono">
-            <span className="h-2 w-2 rounded-full bg-indigo-500 animate-pulse" />
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-tm-surface border border-tm-border text-[11px] text-tm-muted font-mono">
+            <span className="w-1.5 h-1.5 rounded-full bg-tm-accent" />
             Dual-Space Retrieval Active
           </div>
 
-          {/* Log Out button */}
           <button
             onClick={handleLogout}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900 hover:bg-slate-800 border border-slate-850 hover:border-slate-700 text-xs text-slate-400 hover:text-white font-mono transition-all duration-200 hover:scale-[1.02]"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white hover:bg-tm-surface border border-tm-border text-[11px] text-tm-muted hover:text-tm-text transition-colors"
           >
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-              />
-            </svg>
+            <i className="ti ti-logout text-xs" />
             Log Out
           </button>
         </div>
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Main Grid: JD Input Form (left) / Results Leaderboard (right)       */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {/* Main Grid: JD Input Form (left) / Results Leaderboard (right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Form Column */}
-        <div className="lg:col-span-4 bg-slate-950/50 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-md">
-          <h2 className="text-lg font-bold text-slate-100 mb-4 flex items-center gap-2">
-            <svg
-              className="w-5 h-5 text-indigo-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-            </svg>
+        <div className="lg:col-span-4 bg-white border border-tm-border rounded-[12px] p-5">
+          <h2 className="text-sm font-medium text-tm-text mb-4 flex items-center gap-1.5">
+            <i className="ti ti-file-text text-base text-tm-text" />
             Job Profile Analyzer
           </h2>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label
                 htmlFor="position-title"
-                className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5"
+                className="block text-xs font-medium text-tm-muted mb-1"
               >
                 Position Title
               </label>
@@ -470,7 +361,7 @@ export default function AdminDashboard() {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="e.g. Lead Full-Stack Engineer"
-                className="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors"
+                className="w-full bg-white border border-tm-border rounded-[8px] px-3 py-2 text-xs text-tm-text placeholder-gray-400 focus:outline-none focus:border-tm-accent"
                 required
               />
             </div>
@@ -478,7 +369,7 @@ export default function AdminDashboard() {
             <div>
               <label
                 htmlFor="position-domain"
-                className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5"
+                className="block text-xs font-medium text-tm-muted mb-1"
               >
                 Target Domain (Optional)
               </label>
@@ -487,25 +378,25 @@ export default function AdminDashboard() {
                 type="text"
                 value={domain}
                 onChange={(e) => setDomain(e.target.value)}
-                placeholder="e.g. FinTech, SaaS, AdTech"
-                className="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors"
+                placeholder="e.g. FinTech, SaaS"
+                className="w-full bg-white border border-tm-border rounded-[8px] px-3 py-2 text-xs text-tm-text placeholder-gray-400 focus:outline-none focus:border-tm-accent"
               />
             </div>
 
             <div>
               <label
                 htmlFor="job-description"
-                className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5"
+                className="block text-xs font-medium text-tm-muted mb-1"
               >
                 Job Description Details
               </label>
               <textarea
                 id="job-description"
-                rows={10}
+                rows={9}
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
-                placeholder="Paste the raw requirements, technologies, must-have skills, and role expectations here..."
-                className="w-full bg-slate-900/60 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-colors font-mono resize-none leading-relaxed"
+                placeholder="Paste requirements and expectations here..."
+                className="w-full bg-white border border-tm-border rounded-[8px] px-3 py-2.5 text-xs text-tm-text placeholder-gray-400 focus:outline-none focus:border-tm-accent font-mono resize-none leading-relaxed"
                 required
               />
             </div>
@@ -513,52 +404,20 @@ export default function AdminDashboard() {
             <button
               type="submit"
               disabled={isLoading}
-              className={`w-full flex items-center justify-center gap-2 rounded-xl py-3 px-4 font-semibold text-sm transition-all duration-300 shadow-lg ${
+              className={`w-full flex items-center justify-center gap-1.5 rounded-[8px] py-2 px-3 text-xs font-medium transition-colors ${
                 isLoading
-                  ? "bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700/50"
-                  : "bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/25 hover:shadow-indigo-500/35 border border-indigo-500/30 hover:scale-[1.01]"
+                  ? "bg-tm-surface text-tm-muted cursor-not-allowed border border-tm-border"
+                  : "bg-tm-accent hover:bg-neutral-800 text-white border border-transparent"
               }`}
             >
               {isLoading ? (
                 <>
-                  <svg
-                    className="animate-spin h-5 w-5 text-indigo-400"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    />
-                  </svg>
+                  <i className="ti ti-loader text-sm animate-spin" />
                   Evaluating Pipeline...
                 </>
               ) : (
                 <>
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    xmlns="http://www.w3.org/2000/svg"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 9.172V5L8 4z"
-                    />
-                  </svg>
+                  <i className="ti ti-cpu text-sm" />
                   Analyze &amp; Match
                 </>
               )}
@@ -569,37 +428,24 @@ export default function AdminDashboard() {
         {/* Results/Leaderboard & Directory Columns */}
         <div className="lg:col-span-8 flex flex-col gap-6">
           {error && (
-            <div className="bg-rose-950/20 border border-rose-500/30 rounded-2xl p-4 flex items-start gap-3 text-rose-300 text-sm animate-fade-in">
-              <svg
-                className="w-5 h-5 mt-0.5 text-rose-400 shrink-0"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
+            <div className="bg-rose-50 border border-rose-100 rounded-[12px] p-4 flex items-start gap-2.5 text-rose-700 text-xs font-medium">
+              <i className="ti ti-alert-triangle text-sm shrink-0" />
               <div>
-                <span className="font-bold">Evaluation Error:</span> {error}
+                <span className="font-medium">Evaluation Error:</span> {error}
               </div>
             </div>
           )}
 
           {/* Tabbed Leaderboard & Directory Section */}
-          <div className="bg-slate-950/40 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-md flex-1 flex flex-col">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/60 pb-4 mb-4">
-              <div className="flex bg-slate-900 border border-slate-850 rounded-lg p-0.5 text-xs">
+          <div className="bg-white border border-tm-border rounded-[12px] p-5 flex-1 flex flex-col">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-tm-border pb-3 mb-4">
+              <div className="flex bg-tm-surface border border-tm-border rounded-[8px] p-0.5 text-xs font-medium">
                 <button
                   onClick={() => setAdminTab("matching")}
-                  className={`px-4 py-1.5 rounded-md transition-all duration-200 ${
+                  className={`px-3 py-1.5 rounded-[6px] transition-colors ${
                     adminTab === "matching"
-                      ? "bg-indigo-600 text-white font-semibold shadow-md"
-                      : "text-slate-400 hover:text-slate-200"
+                      ? "bg-white text-tm-text border border-tm-border font-medium"
+                      : "text-tm-muted hover:text-tm-text border border-transparent"
                   }`}
                 >
                   Job Match Leaderboard
@@ -609,10 +455,10 @@ export default function AdminDashboard() {
                     setAdminTab("directory");
                     refreshDirectory();
                   }}
-                  className={`px-4 py-1.5 rounded-md transition-all duration-200 ${
+                  className={`px-3 py-1.5 rounded-[6px] transition-colors ${
                     adminTab === "directory"
-                      ? "bg-indigo-600 text-white font-semibold shadow-md"
-                      : "text-slate-400 hover:text-slate-200"
+                      ? "bg-white text-tm-text border border-tm-border font-medium"
+                      : "text-tm-muted hover:text-tm-text border border-transparent"
                   }`}
                 >
                   Public Submissions
@@ -621,13 +467,13 @@ export default function AdminDashboard() {
 
               {adminTab === "matching" ? (
                 matchData && (
-                  <span className="text-xs text-slate-500 font-mono">
+                  <span className="text-xs text-tm-muted font-mono">
                     Scored {matchData.total_scored} candidates
                   </span>
                 )
               ) : (
                 directoryData && (
-                  <span className="text-xs text-slate-500 font-mono">
+                  <span className="text-xs text-tm-muted font-mono">
                     Total: {directoryData.total_stored} profiles
                   </span>
                 )
@@ -639,49 +485,34 @@ export default function AdminDashboard() {
               <div className="flex-1 flex flex-col justify-between">
                 {/* Empty State Banner */}
                 {!isLoading && !matchData && (
-                  <div className="h-64 border border-dashed border-slate-800 rounded-xl flex flex-col items-center justify-center text-center p-6 bg-slate-900/10">
-                    <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mb-3">
-                      <svg
-                        className="w-6 h-6 text-slate-500"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                        />
-                      </svg>
+                  <div className="h-64 border border-dashed border-tm-border rounded-[8px] flex flex-col items-center justify-center text-center p-6 bg-tm-surface">
+                    <div className="w-9 h-9 rounded-full bg-white border border-tm-border flex items-center justify-center mb-3">
+                      <i className="ti ti-search text-base text-tm-muted" />
                     </div>
-                    <h3 className="font-semibold text-slate-300 text-sm">
+                    <h3 className="font-medium text-tm-text text-xs">
                       No Evaluation Data
                     </h3>
-                    <p className="text-slate-500 text-xs mt-1 max-w-sm">
-                      The candidate leaderboard is empty. Enter a Position Title and
-                      Job Description on the left and run analysis to populate
-                      matches.
+                    <p className="text-tm-muted text-xs mt-1 max-w-xs leading-relaxed">
+                      The candidate leaderboard is empty. Enter a Position Title and Job Description on the left and run analysis to populate matches.
                     </p>
                   </div>
                 )}
 
                 {/* Loading Skeleton */}
                 {isLoading && (
-                  <div className="space-y-3">
-                    {[1, 2, 3, 4].map((i) => (
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((i) => (
                       <div
                         key={i}
-                        className="h-14 bg-slate-900/40 border border-slate-800/50 rounded-xl animate-pulse flex items-center justify-between px-4"
+                        className="h-12 bg-tm-surface border border-tm-border rounded-[8px] animate-pulse flex items-center justify-between px-3"
                       >
                         <div className="flex items-center gap-3 w-1/3">
-                          <div className="w-5 h-5 bg-slate-800 rounded" />
-                          <div className="w-24 h-4 bg-slate-800 rounded" />
+                          <div className="w-4 h-4 bg-gray-200 rounded" />
+                          <div className="w-20 h-3 bg-gray-200 rounded" />
                         </div>
-                        <div className="w-16 h-6 bg-slate-800 rounded-full" />
-                        <div className="w-12 h-4 bg-slate-800 rounded" />
-                        <div className="w-12 h-4 bg-slate-800 rounded" />
+                        <div className="w-12 h-5 bg-gray-200 rounded-full" />
+                        <div className="w-10 h-3 bg-gray-200 rounded" />
+                        <div className="w-10 h-3 bg-gray-200 rounded" />
                       </div>
                     ))}
                   </div>
@@ -692,35 +523,23 @@ export default function AdminDashboard() {
                   matchData &&
                   matchData.matches &&
                   matchData.matches.length > 0 && (
-                    <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/10">
+                    <div className="overflow-x-auto rounded-[8px] border border-tm-border bg-white">
                       <table className="w-full text-left border-collapse">
                         <thead>
-                          <tr className="border-b border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-500 bg-slate-950/30">
-                            <th className="py-3 px-4 text-center">Rank</th>
-                            <th className="py-3 px-4">Candidate Profile</th>
-                            <th className="py-3 px-4 text-center">
-                              Composite Score
-                            </th>
-                            <th className="py-3 px-4 text-center hidden md:table-cell">
-                              Role Fit (40%)
-                            </th>
-                            <th className="py-3 px-4 text-center hidden md:table-cell">
-                              Trajectory (30%)
-                            </th>
-                            <th className="py-3 px-4 text-center hidden lg:table-cell">
-                              Signals (20%)
-                            </th>
-                            <th className="py-3 px-4 text-center hidden lg:table-cell">
-                              Domain (10%)
-                            </th>
+                          <tr className="border-b border-tm-border text-[11px] font-medium uppercase tracking-wider text-tm-muted bg-tm-surface">
+                            <th className="py-2.5 px-3 text-center w-12">Rank</th>
+                            <th className="py-2.5 px-3">Candidate Profile</th>
+                            <th className="py-2.5 px-3 text-center">Score</th>
+                            <th className="py-2.5 px-3 text-center hidden md:table-cell">Role Fit</th>
+                            <th className="py-2.5 px-3 text-center hidden md:table-cell">Trajectory</th>
+                            <th className="py-2.5 px-3 text-center hidden lg:table-cell">Signals</th>
+                            <th className="py-2.5 px-3 text-center hidden lg:table-cell">Domain</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-800/50">
+                        <tbody className="divide-y divide-tm-border/60">
                           {matchData.matches.map((match, index) => {
                             const finalPct = formatScore(match.final_score);
-                            const isSelected =
-                              selectedCandidate?.candidate_id ===
-                              match.candidate_id;
+                            const isSelected = selectedCandidate?.candidate_id === match.candidate_id;
 
                             return (
                               <tr
@@ -729,54 +548,52 @@ export default function AdminDashboard() {
                                   setSelectedCandidate(match);
                                   setSelectedDirectoryCandidate(null);
                                 }}
-                                className={`group hover:bg-slate-900/40 cursor-pointer transition-all duration-150 ${
-                                  isSelected
-                                    ? "bg-indigo-950/20 border-l-2 border-l-indigo-500"
-                                    : ""
+                                className={`group hover:bg-tm-surface/65 cursor-pointer transition-colors ${
+                                  isSelected ? "bg-tm-surface font-medium" : ""
                                 }`}
                               >
-                                <td className="py-4 px-4 text-center">
+                                <td className="py-3 px-3 text-center">
                                   <span
-                                    className={`inline-flex items-center justify-center w-6 h-6 rounded-md font-mono text-xs font-bold ${
+                                    className={`inline-flex items-center justify-center w-5 h-5 rounded font-mono text-[11px] font-medium ${
                                       index === 0
-                                        ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                                        ? "bg-amber-50 text-amber-700 border border-amber-100"
                                         : index === 1
-                                        ? "bg-slate-300/20 text-slate-300 border border-slate-300/30"
+                                        ? "bg-gray-100 text-gray-700 border border-gray-200"
                                         : index === 2
-                                        ? "bg-amber-800/20 text-amber-600 border border-amber-800/30"
-                                        : "text-slate-500"
+                                        ? "bg-amber-50/50 text-amber-600 border border-amber-100/50"
+                                        : "text-tm-muted"
                                     }`}
                                   >
                                     {index + 1}
                                   </span>
                                 </td>
-                                <td className="py-4 px-4">
+                                <td className="py-3 px-3">
                                   <div>
-                                    <div className="font-semibold text-slate-200 group-hover:text-white transition-colors">
+                                    <div className="text-xs text-tm-text group-hover:text-tm-accent transition-colors font-medium">
                                       {match.name || "Unknown"}
                                     </div>
-                                    <div className="text-xs text-slate-500 font-mono mt-0.5">
+                                    <div className="text-[10px] text-tm-muted font-mono">
                                       {match.candidate_id}
                                     </div>
                                   </div>
                                 </td>
-                                <td className="py-4 px-4 text-center">
+                                <td className="py-3 px-3 text-center">
                                   <span
-                                    className={`inline-block font-bold text-sm px-2.5 py-1 rounded-full border ${getScoreColorClass(finalPct)}`}
+                                    className={`inline-block text-[11px] px-2 py-0.5 rounded-full border font-mono font-medium ${getScoreColorClass(finalPct)}`}
                                   >
                                     {finalPct}%
                                   </span>
                                 </td>
-                                <td className="py-4 px-4 text-center hidden md:table-cell text-slate-300 text-sm font-mono">
+                                <td className="py-3 px-3 text-center hidden md:table-cell text-tm-text text-xs font-mono">
                                   {formatScore(match.role_fit_score)}%
                                 </td>
-                                <td className="py-4 px-4 text-center hidden md:table-cell text-slate-300 text-sm font-mono">
+                                <td className="py-3 px-3 text-center hidden md:table-cell text-tm-text text-xs font-mono">
                                   {formatScore(match.trajectory_score)}%
                                 </td>
-                                <td className="py-4 px-4 text-center hidden lg:table-cell text-slate-300 text-sm font-mono">
+                                <td className="py-3 px-3 text-center hidden lg:table-cell text-tm-text text-xs font-mono">
                                   {formatScore(match.platform_signals_score)}%
                                 </td>
-                                <td className="py-4 px-4 text-center hidden lg:table-cell text-slate-300 text-sm font-mono">
+                                <td className="py-3 px-3 text-center hidden lg:table-cell text-tm-text text-xs font-mono">
                                   {formatScore(match.domain_alignment_score)}%
                                 </td>
                               </tr>
@@ -793,42 +610,29 @@ export default function AdminDashboard() {
             {adminTab === "directory" && (
               <div className="flex-1 flex flex-col justify-between">
                 {!directoryData || directoryData.candidates.length === 0 ? (
-                  <div className="h-64 border border-dashed border-slate-800 rounded-xl flex flex-col items-center justify-center text-center p-6 bg-slate-900/10">
-                    <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mb-3">
-                      <svg
-                        className="w-6 h-6 text-slate-500"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                        xmlns="http://www.w3.org/2000/svg"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth="2"
-                          d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                        />
-                      </svg>
+                  <div className="h-64 border border-dashed border-tm-border rounded-[8px] flex flex-col items-center justify-center text-center p-6 bg-tm-surface">
+                    <div className="w-9 h-9 rounded-full bg-white border border-tm-border flex items-center justify-center mb-3">
+                      <i className="ti ti-archive text-base text-tm-muted" />
                     </div>
-                    <h3 className="font-semibold text-slate-300 text-sm">
+                    <h3 className="font-medium text-tm-text text-xs">
                       No Registered Profiles
                     </h3>
-                    <p className="text-slate-500 text-xs mt-1 max-w-sm">
+                    <p className="text-tm-muted text-xs mt-1 max-w-xs leading-relaxed">
                       MongoDB cloud directory returned 0 candidate profiles. Upload resumes in the Candidate Ingestion portal to register candidates.
                     </p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/10">
+                  <div className="overflow-x-auto rounded-[8px] border border-tm-border bg-white">
                     <table className="w-full text-left border-collapse">
                       <thead>
-                        <tr className="border-b border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-500 bg-slate-950/30">
-                          <th className="py-3 px-4">Candidate Profile</th>
-                          <th className="py-3 px-4 text-center">Ingestion Date</th>
-                          <th className="py-3 px-4 text-center">Repository</th>
-                          <th className="py-3 px-4 text-right">Actions</th>
+                        <tr className="border-b border-tm-border text-[11px] font-medium uppercase tracking-wider text-tm-muted bg-tm-surface">
+                          <th className="py-2.5 px-3">Candidate Profile</th>
+                          <th className="py-2.5 px-3 text-center">Ingestion Date</th>
+                          <th className="py-2.5 px-3 text-center">Repository</th>
+                          <th className="py-2.5 px-3 text-right">Actions</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-800/50">
+                      <tbody className="divide-y divide-tm-border/60">
                         {directoryData.candidates.map((candidate) => {
                           const isSelected = selectedDirectoryCandidate?.candidate_id === candidate.candidate_id;
                           const formattedDate = candidate.stored_at
@@ -862,33 +666,31 @@ export default function AdminDashboard() {
                                   ]
                                 });
                               }}
-                              className={`group hover:bg-slate-900/40 cursor-pointer transition-all duration-150 ${
-                                isSelected
-                                  ? "bg-indigo-950/20 border-l-2 border-l-indigo-500"
-                                  : ""
+                              className={`group hover:bg-tm-surface/65 cursor-pointer transition-colors ${
+                                isSelected ? "bg-tm-surface font-medium" : ""
                               }`}
                             >
-                              <td className="py-4 px-4">
+                              <td className="py-3 px-3">
                                 <div>
-                                  <div className="font-semibold text-slate-200 group-hover:text-white transition-colors">
+                                  <div className="text-xs text-tm-text group-hover:text-tm-accent transition-colors font-medium">
                                     {candidate.name || "Unknown"}
                                   </div>
-                                  <div className="text-xs text-slate-500 font-mono mt-0.5">
+                                  <div className="text-[10px] text-tm-muted font-mono">
                                     {candidate.candidate_id}
                                   </div>
                                 </div>
                               </td>
-                              <td className="py-4 px-4 text-center text-slate-400 text-xs font-mono">
+                              <td className="py-3 px-3 text-center text-tm-muted text-xs font-mono">
                                 {formattedDate}
                               </td>
-                              <td className="py-4 px-4 text-center">
-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[10px] font-mono">
-                                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                              <td className="py-3 px-3 text-center">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-[4px] bg-tm-surface border border-tm-border text-[10px] text-tm-muted font-mono">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                                   MongoDB Cloud
                                 </span>
                               </td>
-                              <td className="py-4 px-4 text-right">
-                                <button className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold underline decoration-dotted">
+                              <td className="py-3 px-3 text-right">
+                                <button className="text-tm-muted group-hover:text-tm-accent text-xs font-medium underline decoration-dotted transition-colors">
                                   View Diagnostics
                                 </button>
                               </td>
@@ -905,33 +707,18 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Accordion / Detailed XAI Analysis Panel                             */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="bg-slate-950/50 border border-slate-800/80 rounded-2xl p-6 shadow-xl backdrop-blur-md">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4 mb-6">
+      {/* Accordion / Detailed XAI Analysis Panel */}
+      <div className="bg-white border border-tm-border rounded-[12px] p-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-tm-border pb-3 mb-4">
           <div>
-            <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-              <svg
-                className="w-5 h-5 text-indigo-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="M13 10V3L4 14h7v7l9-11h-7z"
-                />
-              </svg>
+            <h2 className="text-sm font-medium text-tm-text flex items-center gap-1.5">
+              <i className="ti ti-sparkles text-base text-tm-text animate-pulse" />
               Explainable AI (XAI) Fit Summary
             </h2>
             {selectedCandidate && (
-              <p className="text-slate-400 text-xs mt-0.5">
+              <p className="text-tm-muted text-xs mt-0.5">
                 Inspect AI breakdown analysis for candidate{" "}
-                <span className="font-mono text-indigo-400 font-bold">
+                <span className="font-mono text-tm-text font-medium">
                   {selectedCandidate.name}
                 </span>{" "}
                 ({selectedCandidate.candidate_id})
@@ -940,46 +727,46 @@ export default function AdminDashboard() {
           </div>
 
           {selectedCandidate && (
-            <div className="flex bg-slate-900 border border-slate-800 rounded-lg p-0.5 text-xs">
+            <div className="flex bg-tm-surface border border-tm-border rounded-[8px] p-0.5 text-xs font-medium">
               <button
                 onClick={() => setActiveDetailTab("all")}
-                className={`px-3 py-1 rounded-md transition-colors ${
+                className={`px-3 py-1 rounded-[6px] transition-colors ${
                   activeDetailTab === "all"
-                    ? "bg-indigo-600 text-white font-semibold"
-                    : "text-slate-400 hover:text-slate-200"
+                    ? "bg-white text-tm-text border border-tm-border"
+                    : "text-tm-muted hover:text-tm-text border border-transparent"
                 }`}
               >
                 All Insights
               </button>
               <button
                 onClick={() => setActiveDetailTab("fit")}
-                className={`px-3 py-1 rounded-md transition-colors ${
+                className={`px-3 py-1 rounded-[6px] transition-colors ${
                   activeDetailTab === "fit"
-                    ? "bg-indigo-600 text-white font-semibold"
-                    : "text-slate-400 hover:text-slate-200"
+                    ? "bg-white text-emerald-700 border border-tm-border"
+                    : "text-tm-muted hover:text-emerald-600 border border-transparent"
                 }`}
               >
-                🟢 Alignment
+                Alignment
               </button>
               <button
                 onClick={() => setActiveDetailTab("gaps")}
-                className={`px-3 py-1 rounded-md transition-colors ${
+                className={`px-3 py-1 rounded-[6px] transition-colors ${
                   activeDetailTab === "gaps"
-                    ? "bg-indigo-600 text-white font-semibold"
-                    : "text-slate-400 hover:text-slate-200"
+                    ? "bg-white text-amber-700 border border-tm-border"
+                    : "text-tm-muted hover:text-amber-600 border border-transparent"
                 }`}
               >
-                🔴 Gaps
+                Gaps
               </button>
               <button
                 onClick={() => setActiveDetailTab("prompts")}
-                className={`px-3 py-1 rounded-md transition-colors ${
+                className={`px-3 py-1 rounded-[6px] transition-colors ${
                   activeDetailTab === "prompts"
-                    ? "bg-indigo-600 text-white font-semibold"
-                    : "text-slate-400 hover:text-slate-200"
+                    ? "bg-white text-indigo-700 border border-tm-border"
+                    : "text-tm-muted hover:text-indigo-600 border border-transparent"
                 }`}
               >
-                🎤 Prompts
+                Prompts
               </button>
             </div>
           )}
@@ -987,74 +774,60 @@ export default function AdminDashboard() {
 
         {/* Detail cards */}
         {!selectedCandidate ? (
-          <div className="h-32 border border-dashed border-slate-800 rounded-xl flex items-center justify-center text-center p-4 bg-slate-900/10">
-            <p className="text-slate-500 text-xs max-w-sm">
-              Please select a candidate from either the Match Leaderboard or Public Submissions
-              to view deep fit alignment metrics and screening guides.
+          <div className="h-24 border border-dashed border-tm-border rounded-[8px] flex items-center justify-center text-center p-4 bg-tm-surface">
+            <p className="text-tm-muted text-xs max-w-sm">
+              Please select a candidate from either the Match Leaderboard or Public Submissions to view deep fit alignment metrics and screening guides.
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Strongest Alignment */}
             {(activeDetailTab === "all" || activeDetailTab === "fit") && (
-              <div className="flex flex-col bg-emerald-950/20 border border-emerald-800/30 rounded-xl p-5 shadow-lg relative overflow-hidden group">
-                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity duration-300">
-                  <span className="text-7xl">🟢</span>
-                </div>
-                <h3 className="text-emerald-400 text-sm font-bold uppercase tracking-wider flex items-center gap-2 mb-3">
-                  <span className="text-base">🟢</span> Strongest Alignment
+              <div className="flex flex-col bg-emerald-50/10 border border-emerald-100 rounded-[8px] p-4">
+                <h3 className="text-emerald-700 text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                  <i className="ti ti-circle-check text-sm" /> Strongest Alignment
                 </h3>
-                <p className="text-emerald-300/90 text-sm leading-relaxed whitespace-pre-line flex-1 bg-slate-900/30 border border-emerald-950/30 rounded-lg p-3">
-                  {selectedCandidate.strongest_alignment ||
-                    "No explicit alignment indicators generated."}
+                <p className="text-emerald-800/95 text-xs leading-relaxed whitespace-pre-line flex-1 bg-white border border-emerald-100/60 rounded-[8px] p-3">
+                  {selectedCandidate.strongest_alignment || "No explicit alignment indicators generated."}
                 </p>
               </div>
             )}
 
             {/* Competency Gaps */}
             {(activeDetailTab === "all" || activeDetailTab === "gaps") && (
-              <div className="flex flex-col bg-amber-950/20 border border-amber-800/30 rounded-xl p-5 shadow-lg relative overflow-hidden group">
-                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity duration-300">
-                  <span className="text-7xl">🔴</span>
-                </div>
-                <h3 className="text-amber-400 text-sm font-bold uppercase tracking-wider flex items-center gap-2 mb-3">
-                  <span className="text-base">🔴</span> Competency Gaps
+              <div className="flex flex-col bg-amber-50/10 border border-amber-100/80 rounded-[8px] p-4">
+                <h3 className="text-amber-700 text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                  <i className="ti ti-circle-x text-sm" /> Competency Gaps
                 </h3>
-                <p className="text-amber-300/90 text-sm leading-relaxed whitespace-pre-line flex-1 bg-slate-900/30 border border-amber-950/30 rounded-lg p-3">
-                  {selectedCandidate.competency_gaps ||
-                    "No severe gaps flagged for this profile."}
+                <p className="text-amber-800/95 text-xs leading-relaxed whitespace-pre-line flex-1 bg-white border border-amber-150 rounded-[8px] p-3">
+                  {selectedCandidate.competency_gaps || "No severe gaps flagged for this profile."}
                 </p>
               </div>
             )}
 
             {/* Screening Prompts */}
             {(activeDetailTab === "all" || activeDetailTab === "prompts") && (
-              <div className="flex flex-col bg-indigo-950/20 border border-indigo-800/30 rounded-xl p-5 shadow-lg relative overflow-hidden group md:col-span-1">
-                <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity duration-300">
-                  <span className="text-7xl">🎤</span>
-                </div>
-                <h3 className="text-indigo-400 text-sm font-bold uppercase tracking-wider flex items-center gap-2 mb-3">
-                  <span className="text-base">🎤</span> Screening Prompts
+              <div className="flex flex-col bg-indigo-50/10 border border-indigo-100 rounded-[8px] p-4 md:col-span-1">
+                <h3 className="text-indigo-700 text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                  <i className="ti ti-messages text-sm" /> Screening Prompts
                 </h3>
                 <div className="space-y-2.5 flex-1 flex flex-col justify-between">
-                  <div className="space-y-2 bg-slate-900/40 rounded-lg p-3 border border-indigo-950/30 overflow-y-auto max-h-52 font-mono text-xs text-indigo-300/90 leading-relaxed scrollbar-thin">
+                  <div className="space-y-2 bg-white rounded-[8px] p-3 border border-indigo-100 overflow-y-auto max-h-52 font-mono text-[11px] text-indigo-900/90 leading-relaxed scrollbar-thin">
                     {selectedCandidate.tailored_interview_prompts &&
                     selectedCandidate.tailored_interview_prompts.length > 0 ? (
-                      selectedCandidate.tailored_interview_prompts.map(
-                        (promptText, i) => (
-                          <div
-                            key={i}
-                            className="p-2 border-b border-indigo-900/20 last:border-b-0 flex gap-2"
-                          >
-                            <span className="text-indigo-500 font-bold shrink-0">
-                              {i + 1}.
-                            </span>
-                            <span className="select-all">{promptText}</span>
-                          </div>
-                        )
-                      )
+                      selectedCandidate.tailored_interview_prompts.map((promptText, i) => (
+                        <div
+                          key={i}
+                          className="py-1.5 border-b border-indigo-50/65 last:border-b-0 flex gap-1.5"
+                        >
+                          <span className="text-indigo-500 font-medium shrink-0">
+                            {i + 1}.
+                          </span>
+                          <span className="select-all">{promptText}</span>
+                        </div>
+                      ))
                     ) : (
-                      <span className="text-slate-500 italic">
+                      <span className="text-tm-muted italic">
                         No tailored screening prompts provided.
                       </span>
                     )}

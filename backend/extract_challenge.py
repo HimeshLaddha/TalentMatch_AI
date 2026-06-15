@@ -6,6 +6,9 @@ import sys
 import logging
 import subprocess
 import asyncio
+import re
+import math
+import hashlib
 from datetime import datetime
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -57,6 +60,123 @@ async def cleanse_mongodb():
         logger.error(f"Error during MongoDB cleansing: {e}")
 
 # ---------------------------------------------------------------------------
+# Anomaly Guards & Regex Tokens
+# ---------------------------------------------------------------------------
+ENG_TITLE_TOKENS = re.compile(
+    r'\b(engineer|scientist|architect|lead|cto|programmer|developer|'
+    r'analyst|researcher|mlops|devops|sre|data)\b',
+    re.IGNORECASE
+)
+
+SENIORITY_FLOOR = {
+    "principal": 8,
+    "staff": 7,
+    "distinguished": 12,
+    "fellow": 15,
+    "vp": 10,
+    "director": 8,
+}
+
+CURRENT_YEAR = 2026
+
+_seen_identity_keys: set[str] = set()
+
+def has_engineering_title(profile: dict) -> bool:
+    # Handles nested or flat profile schemas
+    sub_prof = profile.get("profile", {}) if "profile" in profile else profile
+    if not isinstance(sub_prof, dict):
+        sub_prof = {}
+    current_title = sub_prof.get("current_title", "") or ""
+    
+    career_history = profile.get("career_history", [])
+    if career_history is None:
+        career_history = []
+        
+    titles = [current_title]
+    for role in career_history:
+        if isinstance(role, dict):
+            titles.append(role.get("title", ""))
+            
+    return any(ENG_TITLE_TOKENS.search(t) for t in titles if t)
+
+def credential_inflation_multiplier(profile: dict) -> float:
+    sub_prof = profile.get("profile", {}) if "profile" in profile else profile
+    if not isinstance(sub_prof, dict):
+        sub_prof = {}
+    current_title = sub_prof.get("current_title", "") or ""
+    yoe = float(sub_prof.get("years_of_experience") or 0.0)
+    
+    for word, floor in SENIORITY_FLOOR.items():
+        if re.search(rf"\b{re.escape(word)}\b", current_title, re.IGNORECASE):
+            if yoe < floor:
+                return 0.45
+    return 1.0
+
+def skill_recency_score(profile: dict) -> float:
+    skills = profile.get("skills")
+    if skills is None or not isinstance(skills, list) or not skills:
+        return 0.7
+        
+    weights = []
+    for s in skills:
+        if not isinstance(s, dict):
+            continue
+        year = s.get("last_used_year")
+        if year is None:
+            year = 2023
+        else:
+            try:
+                year = float(year)
+            except (ValueError, TypeError):
+                year = 2023
+        weight = math.exp(-0.15 * (CURRENT_YEAR - year))
+        weights.append(weight)
+        
+    if not weights:
+        return 0.7
+        
+    mean_weight = sum(weights) / len(weights)
+    return max(0.3, min(1.0, mean_weight))
+
+def is_fuzzy_duplicate(profile: dict) -> bool:
+    sub_prof = profile.get("profile", {}) if "profile" in profile else profile
+    if not isinstance(sub_prof, dict):
+        sub_prof = {}
+    signals = profile.get("redrob_signals", {}) if "redrob_signals" in profile else {}
+    if not isinstance(signals, dict):
+        signals = {}
+        
+    name = sub_prof.get("anonymized_name") or profile.get("anonymized_name") or sub_prof.get("name") or profile.get("name") or ""
+    email = sub_prof.get("email") or profile.get("email") or signals.get("email") or ""
+    phone = sub_prof.get("phone") or profile.get("phone") or signals.get("phone") or ""
+    
+    parts = []
+    if name:
+        norm_name = "".join(name.lower().split())
+        if norm_name:
+            parts.append(norm_name)
+    if email:
+        norm_email = email.lower().strip()
+        if norm_email:
+            parts.append(norm_email)
+    if phone:
+        norm_phone = "".join(c for c in str(phone) if c.isdigit())
+        if norm_phone:
+            parts.append(norm_phone)
+            
+    if not parts:
+        return False
+        
+    identity_str = "|".join(parts)
+    key = hashlib.sha256(identity_str.encode("utf-8")).hexdigest()[:16]
+    
+    if key in _seen_identity_keys:
+        return True
+    
+    _seen_identity_keys.add(key)
+    return False
+
+# ---------------------------------------------------------------------------
 # Guarded Heuristic Scoring Engine
 # ---------------------------------------------------------------------------
 def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
@@ -79,17 +199,8 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
         # Steep penalty for candidates above 9 years to prevent over-qualification mismatch
         exp_score = max(0.0, 1.0 - (yoe - 9.0) * 0.15)
         
-    # 2. Role Title Verification (Anti-Keyword Stuffing Trap)
-    tech_tokens = ["engineer", "developer", "scientist", "architect", "lead", "cto", "programmer"]
-    titles = [profile.get("current_title", "")] + [h.get("title", "") for h in history if h]
-    titles = [t.lower() for t in titles if t]
-    
-    has_tech_title = False
-    for title in titles:
-        if any(token in title for token in tech_tokens):
-            has_tech_title = True
-            break
-            
+    # 2. Role Title Verification (Anti-Keyword Stuffing Trap) using regex
+    has_tech_title = has_engineering_title(cand)
     title_multiplier = 1.0 if has_tech_title else 0.05
     
     # 3. Core AI Stack Depth Match
@@ -106,6 +217,9 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
             matched_skills.append(token)
             
     skills_score = len(matched_skills) / len(core_stack)
+    
+    # Apply Skill Recency Score (Guard B) to skills sub-score only
+    skills_score = skills_score * skill_recency_score(cand)
     
     # 4. Behavioral Signals Multiplier (Anti-Honeypot Shield)
     response_rate = float(signals.get("recruiter_response_rate") or 0.0)
@@ -130,9 +244,22 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
     # Calculate base composite score
     base_score = (skills_score * 0.70) + (exp_score * 0.30)
     
+    # Fuzzy Duplicate Identity (Guard C)
+    is_dup = is_fuzzy_duplicate(cand)
+    duplicate_multiplier = 0.0 if is_dup else 1.0
+    
+    # Credential Inflation Detector (Guard A)
+    cred_multiplier = credential_inflation_multiplier(cand)
+    
     # Apply multipliers
-    final_score = base_score * title_multiplier * behavior_multiplier
+    final_score = base_score * title_multiplier * duplicate_multiplier * cred_multiplier * behavior_multiplier
     final_score = round(final_score, 4)
+    
+    # Store intermediate multipliers on cand dictionary
+    cand["_title_multiplier"] = title_multiplier
+    cand["_duplicate_multiplier"] = duplicate_multiplier
+    cand["_cred_multiplier"] = cred_multiplier
+    cand["_behavior_multiplier"] = behavior_multiplier
     
     # Sub-scores structure
     sub_scores = {
@@ -191,6 +318,7 @@ def score_all(gz_path: str = "", *, candidates: list[dict] | None = None) -> lis
     This is the single source of truth for heuristic scoring — imported by
     tasks/pipeline.py to avoid any logic duplication.
     """
+    _seen_identity_keys.clear()
     loaded: list[dict]
 
     if candidates is not None:
@@ -206,10 +334,10 @@ def score_all(gz_path: str = "", *, candidates: list[dict] | None = None) -> lis
         if gz_path and os.path.exists(gz_path):
             logger.info(f"score_all: reading compressed source: {gz_path}")
             try:
-                with gzip.open(gz_path, "rt", encoding="utf-8") as f:
-                    for line in f:
-                        if line.strip():
-                            loaded.append(json.loads(line))
+                with open(gz_path, "rb") as f:
+                    file_bytes = f.read()
+                from parsers.extractors import jsonlgz_parser
+                loaded = jsonlgz_parser(file_bytes)
             except Exception as e:
                 logger.error(f"score_all: failed to read compressed file: {e}")
 
@@ -242,13 +370,50 @@ def score_all(gz_path: str = "", *, candidates: list[dict] | None = None) -> lis
     for cand in loaded:
         cid = cand.get("candidate_id") or "CAND_0000000"
         score, sub_scores, reasoning, xai = compute_candidate_score(cand)
+        profile = cand.get("profile", {}) or {}
+        yoe = float(profile.get("years_of_experience") or 0.0)
+        current_title = profile.get("current_title", "")
+        
         scored.append({
             "candidate_id": cid,
             "score": score,
             "sub_scores": sub_scores,
             "reasoning": reasoning,
             "xai": xai,
+            "years_of_experience": int(round(yoe)) if yoe is not None else 0,
+            "current_title": current_title,
+            "_title_multiplier": cand.get("_title_multiplier", 1.0),
+            "_duplicate_multiplier": cand.get("_duplicate_multiplier", 1.0),
+            "_cred_multiplier": cand.get("_cred_multiplier", 1.0),
+            "_behavior_multiplier": cand.get("_behavior_multiplier", 1.0),
         })
+
+    # Save intermediate components of ALL scored candidates to job_dir/scores.json
+    job_dir = os.path.dirname(gz_path) if gz_path else ""
+    if job_dir and os.path.exists(job_dir):
+        scores_file = os.path.join(job_dir, "scores.json")
+        try:
+            lightweight_scores = []
+            for item in scored:
+                lightweight_scores.append({
+                    "candidate_id": item["candidate_id"],
+                    "role_fit": item["sub_scores"]["role_fit"],
+                    "trajectory": item["sub_scores"]["trajectory"],
+                    "platform_signals": item["sub_scores"]["platform_signals"],
+                    "domain_alignment": item["sub_scores"].get("domain_alignment", 0.5),
+                    "title_multiplier": item["_title_multiplier"],
+                    "duplicate_multiplier": item["_duplicate_multiplier"],
+                    "cred_multiplier": item["_cred_multiplier"],
+                    "behavior_multiplier": item["_behavior_multiplier"],
+                    "years_of_experience": item["years_of_experience"],
+                    "current_title": item["current_title"],
+                    "xai": item["xai"]
+                })
+            with open(scores_file, "w", encoding="utf-8") as fh:
+                json.dump(lightweight_scores, fh)
+            logger.info("Saved intermediate scores to %s", scores_file)
+        except Exception as exc:
+            logger.error("Failed to write intermediate scores to %s: %s", scores_file, exc)
 
     scored.sort(key=lambda x: (-x["score"], x["candidate_id"]))
     top_100 = scored[:100]

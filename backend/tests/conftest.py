@@ -40,28 +40,42 @@ def _make_candidate(
     last_active_date: str = "2025-06-01",
     summary: str = "",
     headline: str = "",
+    skills_with_years: list[dict] | None = None,
+    name: str | None = None,
+    email: str | None = None,
+    phone: str | None = None,
 ) -> dict:
     """Build a candidate dict in the exact shape compute_candidate_score expects."""
-    return {
+    cand = {
         "candidate_id": candidate_id,
         "profile": {
             "years_of_experience": yoe,
             "current_title": current_title,
             "headline": headline or current_title,
             "summary": summary,
-            "anonymized_name": candidate_id,
+            "anonymized_name": name or candidate_id,
         },
         "career_history": [
             {"title": t, "description": f"Worked as {t} for a tech company."}
             for t in history_titles
         ],
-        "skills": [{"name": s} for s in skills],
         "redrob_signals": {
             "recruiter_response_rate": recruiter_response_rate,
             "interview_completion_rate": interview_completion_rate,
             "last_active_date": last_active_date,
         },
     }
+    if skills_with_years is not None:
+        cand["skills"] = skills_with_years
+    else:
+        cand["skills"] = [{"name": s} for s in skills]
+        
+    if email is not None:
+        cand["profile"]["email"] = email
+    if phone is not None:
+        cand["profile"]["phone"] = phone
+        
+    return cand
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +211,85 @@ def sample_candidates() -> list[dict]:
     duplicate_b["profile"]["anonymized_name"] = "DUPLICATE_B"
     cands.append(duplicate_b)
 
-    assert len(cands) == 20, f"Expected 20 candidates, got {len(cands)}"
+    # ── 8 new synthetic test profiles for Task 3 ───────────────────────────
+    # 1. CTO substring bug fail profile: "Sales Director" (should fail title checks)
+    cands.append(_make_candidate(
+        candidate_id="CTO_SUBSTRING_FAIL",
+        yoe=6.0,
+        current_title="Sales Director",
+        skills=_STRONG_AI_SKILLS,
+        history_titles=["Sales Director"],
+    ))
+    # 2. CTO standalone profile (should pass title checks)
+    cands.append(_make_candidate(
+        candidate_id="CTO_STANDALONE",
+        yoe=6.0,
+        current_title="CTO",
+        skills=_STRONG_AI_SKILLS,
+        history_titles=["CTO"],
+    ))
+    # 3. Credential inflation penalized profile (Principal with 3 YoE < floor 8)
+    cands.append(_make_candidate(
+        candidate_id="INFLATED_PRINCIPAL",
+        yoe=3.0,
+        current_title="Principal Engineer",
+        skills=_STRONG_AI_SKILLS,
+        history_titles=["Principal Engineer"],
+    ))
+    # 4. Credential inflation NOT penalized profile (Senior with 6 YoE - Seniority floor check passes or no floor)
+    cands.append(_make_candidate(
+        candidate_id="VALID_SENIOR",
+        yoe=6.0,
+        current_title="Senior Engineer",
+        skills=_STRONG_AI_SKILLS,
+        history_titles=["Senior Engineer"],
+    ))
+    # 5 & 6. Fuzzy Duplicate profiles
+    cands.append(_make_candidate(
+        candidate_id="FUZZY_DUP_1",
+        yoe=6.0,
+        current_title="Senior AI Engineer",
+        skills=_STRONG_AI_SKILLS,
+        history_titles=["Senior AI Engineer"],
+        name="Fuzzy Dup Candidate",
+        email="fuzzy_dup@test.com",
+        phone="9876543210",
+    ))
+    cands.append(_make_candidate(
+        candidate_id="FUZZY_DUP_2",
+        yoe=6.0,
+        current_title="Senior AI Engineer",
+        skills=_STRONG_AI_SKILLS,
+        history_titles=["Senior AI Engineer"],
+        name="Fuzzy Dup Candidate",
+        email="fuzzy_dup@test.com",
+        phone="9876543210",
+    ))
+    # 7 & 8. Skill recency profiles
+    cands.append(_make_candidate(
+        candidate_id="RECENCY_OLD",
+        yoe=6.0,
+        current_title="Senior AI Engineer",
+        skills=[],
+        history_titles=["Senior AI Engineer"],
+        skills_with_years=[
+            {"name": "python", "last_used_year": 2019},
+            {"name": "pytorch", "last_used_year": 2019},
+        ],
+    ))
+    cands.append(_make_candidate(
+        candidate_id="RECENCY_NEW",
+        yoe=6.0,
+        current_title="Senior AI Engineer",
+        skills=[],
+        history_titles=["Senior AI Engineer"],
+        skills_with_years=[
+            {"name": "python", "last_used_year": 2025},
+            {"name": "pytorch", "last_used_year": 2025},
+        ],
+    ))
+
+    assert len(cands) == 28, f"Expected 28 candidates, got {len(cands)}"
     return cands
 
 
