@@ -1,4 +1,4 @@
-import { CandidateProfile, JobDescription, MatchResponse } from '../types';
+import { CandidateProfile, JobDescription, MatchResponse, CandidateMatch } from '../types';
 
 // ---------------------------------------------------------------------------
 // Base URL
@@ -166,4 +166,38 @@ export async function loginAdmin(password: string): Promise<{ token: string }> {
     body: JSON.stringify({ password }),
   });
 }
+
+/**
+ * Triggers the administrative candidate evaluation and synchronization pipeline.
+ * Hits `POST /profiles/evaluate-and-sync`.
+ */
+export async function evaluateAndSync(): Promise<{
+  status: string;
+  total_evaluated: number;
+  total_archived_in_mongo: number;
+  leaderboard: CandidateMatch[];
+}> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return apiFetch<{
+    status: string;
+    total_evaluated: number;
+    total_archived_in_mongo: number;
+    leaderboard: CandidateMatch[];
+  }>('/profiles/evaluate-and-sync', {
+    method: 'POST',
+    headers,
+  });
+}
+
+/**
+ * Returns the absolute URL for the memory-streamed CSV export.
+ */
+export function getExportCsvUrl(): string {
+  return `${API_BASE_URL}/profiles/export-csv`;
+}
+
 

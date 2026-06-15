@@ -1,6 +1,7 @@
 import json
 import os
 import logging
+import csv
 import asyncio
 from pathlib import Path
 import uuid
@@ -8,7 +9,7 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Header
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import io
 import docx
 from pypdf import PdfReader
@@ -245,6 +246,205 @@ async def get_stored_candidates_directory(
             "storage_path": "MongoDB Atlas Cloud Storage",
             "candidates": candidates_summary,
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /evaluate-and-sync (Secured with verify_admin_token)
+# ---------------------------------------------------------------------------
+@router.post(
+    "/evaluate-and-sync",
+    summary="Fetch all MongoDB candidates, run heuristic evaluation, and commit top 100 to the leaderboard",
+)
+async def evaluate_and_sync(
+    payload: dict = Depends(verify_admin_token),
+) -> JSONResponse:
+    """
+    Retrieves all candidate profiles from db.profiles, maps them, scores them,
+    persists the top 100 into the leaderboards collection, and returns the list.
+    """
+    try:
+        db = get_mongo_db()
+        cursor = db.profiles.find({})
+        profiles_raw = []
+        async for doc in cursor:
+            profiles_raw.append(doc)
+    except Exception as exc:
+        logger.error(f"evaluate-and-sync: Failed to read from MongoDB Atlas: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not read profiles from MongoDB Atlas: {exc}",
+        )
+
+    if not profiles_raw:
+        logger.info("POST /profiles/evaluate-and-sync – No profiles found in MongoDB; nothing to evaluate.")
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "total_evaluated": 0,
+                "total_archived_in_mongo": 0,
+                "leaderboard": [],
+            },
+        )
+
+    # Map database docs into the shape extractors.normalize / score_all expects
+    candidates_to_score = []
+    from parsers.extractors import normalize
+
+    for doc in profiles_raw:
+        # Pre-process raw dict to match normalize input
+        cid = doc.get("id") or doc.get("candidate_id")
+        
+        # Determine current title from history if not present
+        current_title = doc.get("current_title")
+        if not current_title:
+            history = doc.get("career_history") or []
+            if history and isinstance(history, list):
+                first_role = history[0]
+                if isinstance(first_role, dict):
+                    current_title = first_role.get("title")
+                elif hasattr(first_role, "title"):
+                    current_title = first_role.title
+                    
+        # Extract skills as list of dicts with name, or strings
+        skills_raw = doc.get("technical_skills") or doc.get("skills") or []
+        skills_normalized = []
+        for s in skills_raw:
+            if isinstance(s, dict):
+                skills_normalized.append(s)
+            elif isinstance(s, str):
+                skills_normalized.append({"name": s, "last_used_year": 2026})
+
+        # Platform/redrob signals mapping
+        sig_raw = doc.get("platform_signals") or doc.get("redrob_signals") or {}
+        
+        # Build raw dict to normalize
+        raw = {
+            "candidate_id": cid,
+            "name": doc.get("name", "Unknown"),
+            "email": doc.get("email", ""),
+            "phone": doc.get("phone", ""),
+            "current_title": current_title,
+            "career_history": doc.get("career_history") or [],
+            "skills": skills_normalized,
+            "redrob_signals": {
+                "recruiter_response_rate": sig_raw.get("recruiter_response_rate") or sig_raw.get("github_contributions_score") or 85.0,
+                "interview_completion_rate": sig_raw.get("interview_completion_rate") or sig_raw.get("assessment_pass_rate", 0.90) * 100.0 if "assessment_pass_rate" in sig_raw else 90.0,
+                "last_active_date": sig_raw.get("last_active_date") or "2026-01-01"
+            }
+        }
+        
+        # Normalize to the canonical scoring shape
+        normalized_cand = normalize(raw)
+        candidates_to_score.append(normalized_cand)
+
+    # Run score_all from extract_challenge
+    from extract_challenge import score_all
+    try:
+        top_100 = score_all(candidates=candidates_to_score)
+    except Exception as exc:
+        logger.error(f"evaluate-and-sync: scoring execution failed: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Candidate scoring engine failed: {exc}",
+        )
+
+    # Format the top 100 scored candidates to MatchResponse format
+    leaderboard_results = []
+    for cand in top_100:
+        xai = cand.get("xai") or {}
+        sub_scores = cand.get("sub_scores") or {}
+        
+        leaderboard_results.append({
+            "candidate_id": cand["candidate_id"],
+            "name": cand.get("name") or xai.get("name") or "Unknown",
+            "rank": cand.get("rank"),
+            "final_score": cand["score"],
+            "role_fit_score": sub_scores.get("role_fit", 0.0),
+            "trajectory_score": sub_scores.get("trajectory", 0.0),
+            "platform_signals_score": sub_scores.get("platform_signals", 0.0),
+            "domain_alignment_score": sub_scores.get("domain_alignment", 0.0),
+            "strongest_alignment": xai.get("strongest_alignment", ""),
+            "competency_gaps": xai.get("competency_gaps", ""),
+            "tailored_interview_prompts": xai.get("prompts", []),
+            "reasoning": cand.get("reasoning", ""),
+            "years_of_experience": cand.get("years_of_experience", 0),
+            "current_title": cand.get("current_title", "")
+        })
+
+    # Clear and commit top 100 to db.leaderboards_collection
+    try:
+        await db.leaderboards_collection.delete_many({})
+        if leaderboard_results:
+            await db.leaderboards_collection.insert_many(leaderboard_results)
+    except Exception as exc:
+        logger.error(f"evaluate-and-sync: database write failed: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to persist leaderboard in database: {exc}",
+        )
+
+    logger.info(f"POST /profiles/evaluate-and-sync – synchronized {len(leaderboard_results)} leaderboard candidate(s).")
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "success",
+            "total_evaluated": len(profiles_raw),
+            "total_archived_in_mongo": len(leaderboard_results),
+            "leaderboard": leaderboard_results,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: GET /export-csv (Unsecured to support browser window.open)
+# ---------------------------------------------------------------------------
+@router.get(
+    "/export-csv",
+    summary="Export the top 100 leaderboard candidates to a memory-streamed CSV file",
+)
+async def export_leaderboard_csv() -> StreamingResponse:
+    """
+    Reads the top 100 candidates from the leaderboard collection and yields
+    them as a memory-streamed CSV file.
+    """
+    try:
+        db = get_mongo_db()
+        cursor = db.leaderboards_collection.find({})
+        candidates = []
+        async for doc in cursor:
+            candidates.append(doc)
+    except Exception as exc:
+        logger.error(f"export-csv: Failed to retrieve leaderboard: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not retrieve leaderboard results: {exc}",
+        )
+
+    # Sort by rank ascending (1 is top rank)
+    candidates.sort(key=lambda x: x.get("rank", 999))
+
+    # Serialize to memory-streamed CSV
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["candidate_id", "rank", "score", "reasoning"])
+    
+    for cand in candidates:
+        writer.writerow([
+            cand.get("candidate_id", ""),
+            cand.get("rank", ""),
+            cand.get("final_score", 0.0),
+            cand.get("reasoning", "")
+        ])
+        
+    output.seek(0)
+    
+    # Return StreamingResponse with CSV headers
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=submission.csv"}
     )
 
 
@@ -715,3 +915,5 @@ async def trigger_database_recovery_sync(
             "errors": errors,
         },
     )
+
+
