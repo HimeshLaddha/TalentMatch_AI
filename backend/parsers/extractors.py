@@ -266,12 +266,13 @@ def extract_with_llm(raw_text: str, file_bytes: bytes) -> Dict[str, Any]:
     if not raw_response and settings.GEMINI_API_KEY:
         try:
             logger.info("extract_with_llm: trying Gemini...")
-            import google.generativeai as genai
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            resp = model.generate_content(
-                f"{system_instructions}\n\nResume:\n{user_prompt}",
-                generation_config=genai.types.GenerationConfig(
+            import google.genai as genai
+            from google.genai import types
+            client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            resp = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=f"{system_instructions}\n\nResume:\n{user_prompt}",
+                config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     temperature=0.0
                 )

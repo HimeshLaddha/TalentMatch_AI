@@ -41,7 +41,8 @@ class RerankerService:
     """
 
     def __init__(self) -> None:
-        self._gemini_model: Optional[Any] = None
+        self._gemini_client: Optional[Any] = None
+        self._gemini_models_to_try: List[str] = []
         self._gemini_model_name: str = ""
         self._groq_client: Optional[Any] = None
         self._openai_client: Optional[Any] = None
@@ -52,33 +53,21 @@ class RerankerService:
         # _active_backend only reflects the highest-priority that succeeded.
         if settings.GEMINI_API_KEY:
             try:
-                import google.generativeai as genai  # type: ignore
-                genai.configure(api_key=settings.GEMINI_API_KEY)
-                # Try newest stable models first; fall back gracefully
-                for model_name in (
+                import google.genai as genai  # type: ignore
+                self._gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
+                self._gemini_models_to_try = [
                     "gemini-2.5-flash",
                     "gemini-2.5-pro",
                     "gemini-1.5-flash",
                     "gemini-1.5-pro",
-                ):
-                    try:
-                        self._gemini_model = genai.GenerativeModel(model_name)
-                        self._gemini_model_name = model_name
-                        if self._active_backend == "none":
-                            self._active_backend = model_name
-                        logger.info(
-                            f"RerankerService: Gemini backend ready ({model_name})."
-                        )
-                        break
-                    except Exception:
-                        continue
-                if not self._gemini_model:
-                    logger.warning(
-                        "RerankerService: No Gemini model could be initialised."
-                    )
+                ]
+                self._gemini_model_name = "gemini-2.5-flash"
+                if self._active_backend == "none":
+                    self._active_backend = "gemini"
+                logger.info("RerankerService: Gemini backend ready (google.genai client).")
             except ImportError:
                 logger.warning(
-                    "google-generativeai not installed; skipping Gemini init."
+                    "google-genai not installed; skipping Gemini init."
                 )
 
         # ── 2. Groq (always initialise when key is available) ────────────
@@ -345,19 +334,28 @@ CRITICAL: Respond with ONLY valid JSON matching this exact schema — no markdow
         raw_response: str = ""
 
         # ── Gemini path ───────────────────────────────────────────────────
-        if self._gemini_model is not None:
+        if self._gemini_client is not None:
             try:
-                import google.generativeai as genai  # type: ignore
+                import google.genai as genai  # type: ignore
+                from google.genai import types
 
                 def _call_gemini() -> str:
-                    resp = self._gemini_model.generate_content(
-                        prompt,
-                        generation_config=genai.types.GenerationConfig(
-                            response_mime_type="application/json",
-                            temperature=0.1,
-                        ),
-                    )
-                    return resp.text
+                    last_err = None
+                    for model_name in self._gemini_models_to_try:
+                        try:
+                            resp = self._gemini_client.models.generate_content(
+                                model=model_name,
+                                contents=prompt,
+                                config=types.GenerateContentConfig(
+                                    response_mime_type="application/json",
+                                    temperature=0.1,
+                                ),
+                            )
+                            return resp.text
+                        except Exception as ex:
+                            last_err = ex
+                            continue
+                    raise last_err or RuntimeError("No Gemini models succeeded")
 
                 # Gemini free-tier RPM is tight; retry once on 429 with
                 # the server-specified retry_delay (capped at 65 s).

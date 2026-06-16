@@ -22,7 +22,7 @@ def create_workspace():
             "pydantic-settings>=2.2.1\n"
             "qdrant-client>=1.8.0\n"
             "openai>=1.14.0\n"
-            "google-generativeai>=0.4.0\n"
+            "google-genai\n"
             "pytest>=8.0.0\n"
             "httpx>=0.27.0\n"
             "python-dotenv>=1.0.1\n"
