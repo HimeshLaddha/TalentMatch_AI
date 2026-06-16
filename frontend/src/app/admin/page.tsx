@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  matchJobDescription,
   triggerDatabaseRecoverySync,
   getStoredCandidatesDirectory,
   RecoverySyncResponse,
@@ -12,7 +11,33 @@ import {
   evaluateAndSync,
   getExportCsvUrl,
 } from "@/lib/api";
-import { CandidateMatch, MatchResponse } from "@/types";
+import { CandidateMatch } from "@/types";
+
+interface AdminCareerHistory {
+  title?: string;
+  years?: number;
+  company?: string;
+  description?: string;
+}
+
+interface AdminSkill {
+  name?: string;
+}
+
+interface MatchLeaderboardCandidate {
+  candidate_id: string;
+  name: string;
+  current_title?: string;
+  years_of_experience?: number;
+  last_score?: number;
+  jd_score: number;
+  jd_match_pct: number;
+  jd_multiplier?: number;
+  skills?: (string | AdminSkill)[];
+  career_history?: AdminCareerHistory[];
+  reasoning?: string;
+  rank: number;
+}
 
 // ---------------------------------------------------------------------------
 // Recovery sync status shape for the UI badge
@@ -116,8 +141,13 @@ export default function AdminDashboard() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [matchData, setMatchData] = useState<MatchResponse | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<CandidateMatch | null>(null);
+
+  const [topN, setTopN] = useState<number>(25);
+  const [results, setResults] = useState<MatchLeaderboardCandidate[]>([]);
+  const [scoredCount, setScoredCount] = useState<number>(0);
+  const [jdTokenCount, setJdTokenCount] = useState<number>(0);
+  const [selected, setSelected] = useState<MatchLeaderboardCandidate | null>(null);
 
   const [activeDetailTab, setActiveDetailTab] = useState<"all" | "fit" | "gaps" | "prompts">("all");
   const [syncState, setSyncState] = useState<SyncState>({ phase: "idle" });
@@ -140,11 +170,6 @@ export default function AdminDashboard() {
       try {
         const evalResult = await evaluateAndSync();
         if (evalResult && evalResult.leaderboard) {
-          const matchResponse: MatchResponse = {
-            matches: evalResult.leaderboard,
-            total_scored: evalResult.total_evaluated
-          };
-          setMatchData(matchResponse);
           if (evalResult.leaderboard.length > 0) {
             setSelectedCandidate(evalResult.leaderboard[0]);
           }
@@ -201,21 +226,42 @@ export default function AdminDashboard() {
     setError(null);
     setSelectedCandidate(null);
     setSelectedDirectoryCandidate(null);
+    setSelected(null);
+    setResults([]);
+    setScoredCount(0);
 
     try {
-      const response = await matchJobDescription({
-        title: title.trim(),
-        raw_text: rawText.trim(),
-        domain: domain.trim() || undefined,
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/v1/admin/analyze", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          position_title: title.trim(),
+          target_domain: domain.trim(),
+          jd_text: rawText.trim(),
+          top_n: topN,
+        }),
       });
-      setMatchData(response);
-      if (response.matches && response.matches.length > 0) {
-        setSelectedCandidate(response.matches[0]);
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Analysis failed");
+      }
+
+      const data = await res.json();
+      setResults(data.candidates);
+      setScoredCount(data.scored);
+      setJdTokenCount(data.jd_token_count);
+      if (data.candidates && data.candidates.length > 0) {
+        setSelected(data.candidates[0]);
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Failed to process matching pipeline.";
       setError(errMsg);
-      setMatchData(null);
+      setResults([]);
     } finally {
       setIsLoading(false);
     }
@@ -239,25 +285,17 @@ export default function AdminDashboard() {
   const handleLogout = () => {
     localStorage.removeItem("token");
     setToken(null);
-    setMatchData(null);
     setSelectedCandidate(null);
     setSelectedDirectoryCandidate(null);
     setDirectoryData(null);
     setSyncState({ phase: "idle" });
+    setResults([]);
+    setScoredCount(0);
+    setJdTokenCount(0);
+    setSelected(null);
   };
 
-  const formatScore = (val: number): string => {
-    const scale = val <= 1.0 ? 100 : 1;
-    return `${Math.round(val * scale)}`;
-  };
 
-  const getScoreColorClass = (scoreStr: string): string => {
-    const score = parseInt(scoreStr, 10);
-    if (score >= 85) return "text-emerald-700 bg-emerald-50 border-emerald-100";
-    if (score >= 70) return "text-sky-700 bg-sky-50 border-sky-100";
-    if (score >= 50) return "text-amber-700 bg-amber-50 border-amber-150";
-    return "text-rose-700 bg-rose-50 border-rose-100";
-  };
 
   if (!isInitialized) {
     return (
@@ -419,6 +457,25 @@ export default function AdminDashboard() {
               />
             </div>
 
+            <div className="mb-4">
+              <label
+                htmlFor="top-n"
+                className="block text-xs font-medium text-tm-muted mb-1"
+              >
+                Match Limit
+              </label>
+              <select
+                id="top-n"
+                value={topN}
+                onChange={(e) => setTopN(Number(e.target.value))}
+                className="w-full bg-white border border-tm-border rounded-[8px] px-3 py-2 text-xs text-tm-text cursor-pointer focus:outline-none focus:border-tm-accent"
+              >
+                <option value={10}>Top 10 Candidates</option>
+                <option value={25}>Top 25 Candidates</option>
+                <option value={50}>Top 50 Candidates</option>
+              </select>
+            </div>
+
             <button
               type="submit"
               disabled={isLoading}
@@ -459,7 +516,10 @@ export default function AdminDashboard() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-tm-border pb-3 mb-4">
               <div className="flex bg-tm-surface border border-tm-border rounded-[8px] p-0.5 text-xs font-medium">
                 <button
-                  onClick={() => setAdminTab("matching")}
+                  onClick={() => {
+                    setAdminTab("matching");
+                    setSelectedDirectoryCandidate(null);
+                  }}
                   className={`px-3 py-1.5 rounded-[6px] transition-colors ${
                     adminTab === "matching"
                       ? "bg-white text-tm-text border border-tm-border font-medium"
@@ -471,6 +531,7 @@ export default function AdminDashboard() {
                 <button
                   onClick={() => {
                     setAdminTab("directory");
+                    setSelected(null);
                     refreshDirectory();
                   }}
                   className={`px-3 py-1.5 rounded-[6px] transition-colors ${
@@ -485,12 +546,16 @@ export default function AdminDashboard() {
 
               {adminTab === "matching" ? (
                 <div className="flex items-center gap-3">
-                  {matchData && (
-                    <span className="text-xs text-tm-muted font-mono">
-                      Scored {matchData.total_scored} candidates
-                    </span>
+                  {isLoading ? (
+                    <span className="text-xs text-tm-muted font-mono">Analyzing...</span>
+                  ) : (
+                    scoredCount > 0 && (
+                      <span className="text-xs text-tm-muted font-mono">
+                        Scored {scoredCount.toLocaleString()} candidates · showing top {results.length} · {jdTokenCount} JD keywords matched
+                      </span>
+                    )
                   )}
-                  {matchData && matchData.matches && matchData.matches.length > 0 && (
+                  {results.length > 0 && (
                     <button
                       onClick={() => {
                         window.open(getExportCsvUrl(), "_blank");
@@ -515,7 +580,7 @@ export default function AdminDashboard() {
             {adminTab === "matching" && (
               <div className="flex-1 flex flex-col justify-between">
                 {/* Empty State Banner */}
-                {!isLoading && !matchData && (
+                {!isLoading && results.length === 0 && (
                   <div className="h-64 border border-dashed border-tm-border rounded-[8px] flex flex-col items-center justify-center text-center p-6 bg-tm-surface">
                     <div className="w-9 h-9 rounded-full bg-white border border-tm-border flex items-center justify-center mb-3">
                       <i className="ti ti-search text-base text-tm-muted" />
@@ -550,90 +615,103 @@ export default function AdminDashboard() {
                 )}
 
                 {/* Results Table */}
-                {!isLoading &&
-                  matchData &&
-                  matchData.matches &&
-                  matchData.matches.length > 0 && (
-                    <div className="overflow-x-auto rounded-[8px] border border-tm-border bg-white">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="border-b border-tm-border text-[11px] font-medium uppercase tracking-wider text-tm-muted bg-tm-surface">
-                            <th className="py-2.5 px-3 text-center w-12">Rank</th>
-                            <th className="py-2.5 px-3">Candidate Profile</th>
-                            <th className="py-2.5 px-3 text-center">Score</th>
-                            <th className="py-2.5 px-3 text-center hidden md:table-cell">Role Fit</th>
-                            <th className="py-2.5 px-3 text-center hidden md:table-cell">Trajectory</th>
-                            <th className="py-2.5 px-3 text-center hidden lg:table-cell">Signals</th>
-                            <th className="py-2.5 px-3 text-center hidden lg:table-cell">Domain</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-tm-border/60">
-                          {matchData.matches.map((match, index) => {
-                            const finalPct = formatScore(match.final_score);
-                            const isSelected = selectedCandidate?.candidate_id === match.candidate_id;
+                {!isLoading && results.length > 0 && (
+                  <div className="overflow-x-auto rounded-[8px] border border-tm-border bg-white">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-tm-border text-[11px] font-medium uppercase tracking-wider text-tm-muted bg-tm-surface">
+                          <th className="py-2.5 px-3 text-center w-12">Rank</th>
+                          <th className="py-2.5 px-3">Candidate</th>
+                          <th className="py-2.5 px-3 text-center w-36">JD Score</th>
+                          <th className="py-2.5 px-3 text-center w-20">YoE</th>
+                          <th className="py-2.5 px-3 text-center w-24">JD Match</th>
+                          <th className="py-2.5 px-3 text-right w-24">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-tm-border/60">
+                        {results.map((c) => {
+                          const isSelected = selected?.candidate_id === c.candidate_id;
 
-                            return (
-                              <tr
-                                key={match.candidate_id}
-                                onClick={() => {
-                                  setSelectedCandidate(match);
-                                  setSelectedDirectoryCandidate(null);
-                                }}
-                                className={`group hover:bg-tm-surface/65 cursor-pointer transition-colors ${
-                                  isSelected ? "bg-tm-surface font-medium" : ""
-                                }`}
-                              >
-                                <td className="py-3 px-3 text-center">
-                                  <span
-                                    className={`inline-flex items-center justify-center w-5 h-5 rounded font-mono text-[11px] font-medium ${
-                                      index === 0
-                                        ? "bg-amber-50 text-amber-700 border border-amber-100"
-                                        : index === 1
-                                        ? "bg-gray-100 text-gray-700 border border-gray-200"
-                                        : index === 2
-                                        ? "bg-amber-50/50 text-amber-600 border border-amber-100/50"
-                                        : "text-tm-muted"
-                                    }`}
-                                  >
-                                    {index + 1}
-                                  </span>
-                                </td>
-                                <td className="py-3 px-3">
-                                  <div>
-                                    <div className="text-xs text-tm-text group-hover:text-tm-accent transition-colors font-medium">
-                                      {match.name || "Unknown"}
-                                    </div>
-                                    <div className="text-[10px] text-tm-muted font-mono">
-                                      {match.candidate_id}
-                                    </div>
+                          return (
+                            <tr
+                              key={c.candidate_id}
+                              onClick={() => {
+                                setSelected(c);
+                              }}
+                              className={`group hover:bg-tm-surface/65 cursor-pointer transition-colors ${
+                                isSelected ? "bg-tm-surface font-medium" : ""
+                              }`}
+                            >
+                              <td className="py-3 px-3 text-center">
+                                <span
+                                  className={`inline-flex items-center justify-center w-5 h-5 rounded font-mono text-[11px] font-medium ${
+                                    c.rank <= 3
+                                      ? "bg-amber-50 text-[#B8820A] border border-amber-100 font-semibold"
+                                      : "text-tm-muted"
+                                  }`}
+                                >
+                                  #{c.rank}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3">
+                                <div>
+                                  <div className="text-xs text-tm-text group-hover:text-tm-accent transition-colors font-semibold">
+                                    {c.candidate_id}
                                   </div>
-                                </td>
-                                <td className="py-3 px-3 text-center">
-                                  <span
-                                    className={`inline-block text-[11px] px-2 py-0.5 rounded-full border font-mono font-medium ${getScoreColorClass(finalPct)}`}
-                                  >
-                                    {finalPct}%
+                                  <div className="text-[10px] text-tm-muted font-mono">
+                                    {c.current_title || "—"}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="py-3 px-3">
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 h-1 bg-tm-border rounded-full overflow-hidden">
+                                    <div
+                                      className="h-full bg-tm-text rounded-full"
+                                      style={{
+                                        width: `${(c.jd_score / (results[0]?.jd_score || 1)) * 100}%`
+                                      }}
+                                    />
+                                  </div>
+                                  <span className="text-[11px] font-mono font-medium shrink-0">
+                                    {c.jd_score.toFixed(3)}
                                   </span>
-                                </td>
-                                <td className="py-3 px-3 text-center hidden md:table-cell text-tm-text text-xs font-mono">
-                                  {formatScore(match.role_fit_score)}%
-                                </td>
-                                <td className="py-3 px-3 text-center hidden md:table-cell text-tm-text text-xs font-mono">
-                                  {formatScore(match.trajectory_score)}%
-                                </td>
-                                <td className="py-3 px-3 text-center hidden lg:table-cell text-tm-text text-xs font-mono">
-                                  {formatScore(match.platform_signals_score)}%
-                                </td>
-                                <td className="py-3 px-3 text-center hidden lg:table-cell text-tm-text text-xs font-mono">
-                                  {formatScore(match.domain_alignment_score)}%
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-3 text-center text-tm-muted text-xs font-mono">
+                                {c.years_of_experience} yrs
+                              </td>
+                              <td className="py-3 px-3 text-center">
+                                <span
+                                  className={`inline-block text-[10px] px-2.5 py-0.5 rounded-full font-medium border ${
+                                    c.jd_match_pct >= 61
+                                      ? "text-emerald-700 bg-emerald-50 border-emerald-100"
+                                      : c.jd_match_pct >= 31
+                                      ? "text-amber-700 bg-amber-50 border-amber-150"
+                                      : "text-tm-muted bg-tm-surface border-tm-border"
+                                  }`}
+                                >
+                                  {c.jd_match_pct}%
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 text-right">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelected(c);
+                                  }}
+                                  className="text-tm-muted hover:text-tm-accent text-xs font-medium underline decoration-dotted transition-colors"
+                                >
+                                  View XAI
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 
@@ -740,133 +818,222 @@ export default function AdminDashboard() {
 
       {/* Accordion / Detailed XAI Analysis Panel */}
       <div className="bg-white border border-tm-border rounded-[12px] p-5">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-tm-border pb-3 mb-4">
-          <div>
-            <h2 className="text-sm font-medium text-tm-text flex items-center gap-1.5">
-              <i className="ti ti-sparkles text-base text-tm-text animate-pulse" />
-              Explainable AI (XAI) Fit Summary
-            </h2>
-            {selectedCandidate && (
-              <p className="text-tm-muted text-xs mt-0.5">
-                Inspect AI breakdown analysis for candidate{" "}
-                <span className="font-mono text-tm-text font-medium">
-                  {selectedCandidate.name}
-                </span>{" "}
-                ({selectedCandidate.candidate_id})
+        {adminTab === "matching" ? (
+          !selected ? (
+            <div className="h-24 border border-dashed border-tm-border rounded-[8px] flex items-center justify-center text-center p-4 bg-tm-surface">
+              <p className="text-tm-muted text-xs max-w-sm">
+                Please select a candidate from the Match Leaderboard to view deep fit alignment metrics and screening guides.
               </p>
-            )}
-          </div>
-
-          {selectedCandidate && (
-            <div className="flex bg-tm-surface border border-tm-border rounded-[8px] p-0.5 text-xs font-medium">
-              <button
-                onClick={() => setActiveDetailTab("all")}
-                className={`px-3 py-1 rounded-[6px] transition-colors ${
-                  activeDetailTab === "all"
-                    ? "bg-white text-tm-text border border-tm-border"
-                    : "text-tm-muted hover:text-tm-text border border-transparent"
-                }`}
-              >
-                All Insights
-              </button>
-              <button
-                onClick={() => setActiveDetailTab("fit")}
-                className={`px-3 py-1 rounded-[6px] transition-colors ${
-                  activeDetailTab === "fit"
-                    ? "bg-white text-emerald-700 border border-tm-border"
-                    : "text-tm-muted hover:text-emerald-600 border border-transparent"
-                }`}
-              >
-                Alignment
-              </button>
-              <button
-                onClick={() => setActiveDetailTab("gaps")}
-                className={`px-3 py-1 rounded-[6px] transition-colors ${
-                  activeDetailTab === "gaps"
-                    ? "bg-white text-amber-700 border border-tm-border"
-                    : "text-tm-muted hover:text-amber-600 border border-transparent"
-                }`}
-              >
-                Gaps
-              </button>
-              <button
-                onClick={() => setActiveDetailTab("prompts")}
-                className={`px-3 py-1 rounded-[6px] transition-colors ${
-                  activeDetailTab === "prompts"
-                    ? "bg-white text-indigo-700 border border-tm-border"
-                    : "text-tm-muted hover:text-indigo-600 border border-transparent"
-                }`}
-              >
-                Prompts
-              </button>
             </div>
-          )}
-        </div>
-
-        {/* Detail cards */}
-        {!selectedCandidate ? (
-          <div className="h-24 border border-dashed border-tm-border rounded-[8px] flex items-center justify-center text-center p-4 bg-tm-surface">
-            <p className="text-tm-muted text-xs max-w-sm">
-              Please select a candidate from either the Match Leaderboard or Public Submissions to view deep fit alignment metrics and screening guides.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Strongest Alignment */}
-            {(activeDetailTab === "all" || activeDetailTab === "fit") && (
-              <div className="flex flex-col bg-emerald-50/10 border border-emerald-100 rounded-[8px] p-4">
-                <h3 className="text-emerald-700 text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 mb-2">
-                  <i className="ti ti-circle-check text-sm" /> Strongest Alignment
-                </h3>
-                <p className="text-emerald-800/95 text-xs leading-relaxed whitespace-pre-line flex-1 bg-white border border-emerald-100/60 rounded-[8px] p-3">
-                  {selectedCandidate.strongest_alignment || "No explicit alignment indicators generated."}
-                </p>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-tm-border pb-3">
+                <div>
+                  <h2 className="text-sm font-medium text-tm-text flex items-center gap-1.5">
+                    <i className="ti ti-sparkles text-base text-tm-text" />
+                    Candidate Profile Analysis — {selected.name || "Unknown"}
+                  </h2>
+                  <p className="text-tm-muted text-xs mt-0.5">
+                    ID: <span className="font-mono text-tm-text font-medium">{selected.candidate_id}</span> · {selected.current_title || "—"} · {selected.years_of_experience} yrs of experience
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <div className="text-[10px] text-tm-muted font-medium uppercase tracking-wider">JD Match Score</div>
+                    <div className="text-lg font-bold text-tm-text leading-tight">{selected.jd_score.toFixed(3)}</div>
+                  </div>
+                  <span className={`inline-block text-[11px] px-3 py-1 rounded-full border font-medium ${
+                    selected.jd_match_pct >= 61
+                      ? "text-emerald-700 bg-emerald-50 border-emerald-100"
+                      : selected.jd_match_pct >= 31
+                      ? "text-amber-700 bg-amber-50 border-amber-150"
+                      : "text-tm-muted bg-tm-surface border-tm-border"
+                  }`}>
+                    {selected.jd_match_pct}% Match
+                  </span>
+                </div>
               </div>
-            )}
 
-            {/* Competency Gaps */}
-            {(activeDetailTab === "all" || activeDetailTab === "gaps") && (
-              <div className="flex flex-col bg-amber-50/10 border border-amber-100/80 rounded-[8px] p-4">
-                <h3 className="text-amber-700 text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 mb-2">
-                  <i className="ti ti-circle-x text-sm" /> Competency Gaps
-                </h3>
-                <p className="text-amber-800/95 text-xs leading-relaxed whitespace-pre-line flex-1 bg-white border border-amber-150 rounded-[8px] p-3">
-                  {selectedCandidate.competency_gaps || "No severe gaps flagged for this profile."}
-                </p>
-              </div>
-            )}
+              {selected.reasoning && (
+                <div className="bg-tm-surface border border-tm-border rounded-[8px] p-3 text-xs leading-relaxed text-tm-text whitespace-pre-line">
+                  <span className="font-medium text-tm-text block mb-1">Reasoning Analysis:</span>
+                  {selected.reasoning}
+                </div>
+              )}
 
-            {/* Screening Prompts */}
-            {(activeDetailTab === "all" || activeDetailTab === "prompts") && (
-              <div className="flex flex-col bg-indigo-50/10 border border-indigo-100 rounded-[8px] p-4 md:col-span-1">
-                <h3 className="text-indigo-700 text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 mb-2">
-                  <i className="ti ti-messages text-sm" /> Screening Prompts
-                </h3>
-                <div className="space-y-2.5 flex-1 flex flex-col justify-between">
-                  <div className="space-y-2 bg-white rounded-[8px] p-3 border border-indigo-100 overflow-y-auto max-h-52 font-mono text-[11px] text-indigo-900/90 leading-relaxed scrollbar-thin">
-                    {selectedCandidate.tailored_interview_prompts &&
-                    selectedCandidate.tailored_interview_prompts.length > 0 ? (
-                      selectedCandidate.tailored_interview_prompts.map((promptText, i) => (
-                        <div
-                          key={i}
-                          className="py-1.5 border-b border-indigo-50/65 last:border-b-0 flex gap-1.5"
-                        >
-                          <span className="text-indigo-500 font-medium shrink-0">
-                            {i + 1}.
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="border border-tm-border rounded-[8px] p-4 bg-tm-surface/30">
+                  <h3 className="text-xs font-semibold text-tm-text uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <i className="ti ti-checklist text-sm text-tm-muted" /> Skills Inventory
+                  </h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selected.skills && selected.skills.length > 0 ? (
+                      selected.skills.map((s: string | AdminSkill, idx: number) => {
+                        const sName = typeof s === 'string' ? s : s?.name || "";
+                        if (!sName) return null;
+                        return (
+                          <span key={idx} className="px-2.5 py-0.5 rounded-full bg-white border border-tm-border text-[10px] text-tm-text font-mono font-medium">
+                            {sName}
                           </span>
-                          <span className="select-all">{promptText}</span>
+                        );
+                      })
+                    ) : (
+                      <span className="text-tm-muted text-xs italic">No skills listed for this candidate.</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border border-tm-border rounded-[8px] p-4 bg-tm-surface/30">
+                  <h3 className="text-xs font-semibold text-tm-text uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                    <i className="ti ti-briefcase text-sm text-tm-muted" /> Career History
+                  </h3>
+                  <div className="space-y-3 max-h-48 overflow-y-auto pr-1 scrollbar-thin">
+                    {selected.career_history && selected.career_history.length > 0 ? (
+                      selected.career_history.map((job: AdminCareerHistory, idx: number) => (
+                        <div key={idx} className="border-l-2 border-tm-border pl-3 py-0.5 space-y-1">
+                          <div className="flex justify-between items-start text-xs">
+                            <span className="font-semibold text-tm-text">{job.title || "Unknown Title"}</span>
+                            <span className="text-[10px] font-mono text-tm-muted">{job.years ? `${job.years} yrs` : ""}</span>
+                          </div>
+                          <div className="text-[10px] text-tm-muted font-medium">{job.company || "Unknown Company"}</div>
+                          {job.description && (
+                            <p className="text-[10px] text-tm-muted leading-relaxed line-clamp-2" title={job.description}>
+                              {job.description}
+                            </p>
+                          )}
                         </div>
                       ))
                     ) : (
-                      <span className="text-tm-muted italic">
-                        No tailored screening prompts provided.
-                      </span>
+                      <span className="text-tm-muted text-xs italic">No career history listed.</span>
                     )}
                   </div>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )
+        ) : (
+          !selectedCandidate ? (
+            <div className="h-24 border border-dashed border-tm-border rounded-[8px] flex items-center justify-center text-center p-4 bg-tm-surface">
+              <p className="text-tm-muted text-xs max-w-sm">
+                Please select a candidate from Public Submissions to view deep fit alignment metrics and screening guides.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-tm-border pb-3 mb-4">
+                <div>
+                  <h2 className="text-sm font-medium text-tm-text flex items-center gap-1.5">
+                    <i className="ti ti-sparkles text-base text-tm-text animate-pulse" />
+                    Explainable AI (XAI) Fit Summary
+                  </h2>
+                  <p className="text-tm-muted text-xs mt-0.5">
+                    Inspect AI breakdown analysis for candidate{" "}
+                    <span className="font-mono text-tm-text font-medium font-semibold">
+                      {selectedCandidate.name}
+                    </span>{" "}
+                    ({selectedCandidate.candidate_id})
+                  </p>
+                </div>
+
+                <div className="flex bg-tm-surface border border-tm-border rounded-[8px] p-0.5 text-xs font-medium">
+                  <button
+                    onClick={() => setActiveDetailTab("all")}
+                    className={`px-3 py-1 rounded-[6px] transition-colors ${
+                      activeDetailTab === "all"
+                        ? "bg-white text-tm-text border border-tm-border"
+                        : "text-tm-muted hover:text-tm-text border border-transparent"
+                    }`}
+                  >
+                    All Insights
+                  </button>
+                  <button
+                    onClick={() => setActiveDetailTab("fit")}
+                    className={`px-3 py-1 rounded-[6px] transition-colors ${
+                      activeDetailTab === "fit"
+                        ? "bg-white text-emerald-700 border border-tm-border"
+                        : "text-tm-muted hover:text-emerald-600 border border-transparent"
+                    }`}
+                  >
+                    Alignment
+                  </button>
+                  <button
+                    onClick={() => setActiveDetailTab("gaps")}
+                    className={`px-3 py-1 rounded-[6px] transition-colors ${
+                      activeDetailTab === "gaps"
+                        ? "bg-white text-amber-700 border border-tm-border"
+                        : "text-tm-muted hover:text-amber-600 border border-transparent"
+                    }`}
+                  >
+                    Gaps
+                  </button>
+                  <button
+                    onClick={() => setActiveDetailTab("prompts")}
+                    className={`px-3 py-1 rounded-[6px] transition-colors ${
+                      activeDetailTab === "prompts"
+                        ? "bg-white text-indigo-700 border border-tm-border"
+                        : "text-tm-muted hover:text-indigo-600 border border-transparent"
+                    }`}
+                  >
+                    Prompts
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {(activeDetailTab === "all" || activeDetailTab === "fit") && (
+                  <div className="flex flex-col bg-emerald-50/10 border border-emerald-100 rounded-[8px] p-4">
+                    <h3 className="text-emerald-700 text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                      <i className="ti ti-circle-check text-sm" /> Strongest Alignment
+                    </h3>
+                    <p className="text-emerald-800/95 text-xs leading-relaxed whitespace-pre-line flex-1 bg-white border border-emerald-100/60 rounded-[8px] p-3">
+                      {selectedCandidate.strongest_alignment || "No explicit alignment indicators generated."}
+                    </p>
+                  </div>
+                )}
+
+                {(activeDetailTab === "all" || activeDetailTab === "gaps") && (
+                  <div className="flex flex-col bg-amber-50/10 border border-amber-100/80 rounded-[8px] p-4">
+                    <h3 className="text-amber-700 text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                      <i className="ti ti-circle-x text-sm" /> Competency Gaps
+                    </h3>
+                    <p className="text-amber-800/95 text-xs leading-relaxed whitespace-pre-line flex-1 bg-white border border-amber-150 rounded-[8px] p-3">
+                      {selectedCandidate.competency_gaps || "No severe gaps flagged for this profile."}
+                    </p>
+                  </div>
+                )}
+
+                {(activeDetailTab === "all" || activeDetailTab === "prompts") && (
+                  <div className="flex flex-col bg-indigo-50/10 border border-indigo-100 rounded-[8px] p-4 md:col-span-1">
+                    <h3 className="text-indigo-700 text-xs font-medium uppercase tracking-wider flex items-center gap-1.5 mb-2">
+                      <i className="ti ti-messages text-sm" /> Screening Prompts
+                    </h3>
+                    <div className="space-y-2.5 flex-1 flex flex-col justify-between">
+                      <div className="space-y-2 bg-white rounded-[8px] p-3 border border-indigo-100 overflow-y-auto max-h-52 font-mono text-[11px] text-indigo-900/90 leading-relaxed scrollbar-thin">
+                        {selectedCandidate.tailored_interview_prompts &&
+                        selectedCandidate.tailored_interview_prompts.length > 0 ? (
+                          selectedCandidate.tailored_interview_prompts.map((promptText, i) => (
+                            <div
+                              key={i}
+                              className="py-1.5 border-b border-indigo-50/65 last:border-b-0 flex gap-1.5"
+                            >
+                              <span className="text-indigo-500 font-medium shrink-0">
+                                {i + 1}.
+                              </span>
+                              <span className="select-all">{promptText}</span>
+                            </div>
+                          ))
+                        ) : (
+                          <span className="text-tm-muted italic">
+                            No tailored screening prompts provided.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )
         )}
       </div>
     </div>

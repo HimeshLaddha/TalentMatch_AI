@@ -4,7 +4,10 @@ import { CandidateProfile, JobDescription, MatchResponse, CandidateMatch } from 
 // Base URL
 // ---------------------------------------------------------------------------
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
+// Use relative path so all requests go through the Next.js rewrite proxy
+// (next.config.ts maps /api/* → http://localhost:8000/api/*)
+// This avoids cross-origin requests entirely and removes the CORS requirement.
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 
 // ---------------------------------------------------------------------------
 // Shared response types for the persistence / recovery layer

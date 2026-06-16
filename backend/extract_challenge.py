@@ -64,7 +64,7 @@ async def cleanse_mongodb():
 # ---------------------------------------------------------------------------
 ENG_TITLE_TOKENS = re.compile(
     r'\b(engineer|scientist|architect|lead|cto|programmer|developer|'
-    r'analyst|researcher|mlops|devops|sre|data)\b',
+    r'analyst|researcher|mlops|devops|sre|data|specialist|expert)\b',
     re.IGNORECASE
 )
 
@@ -96,15 +96,15 @@ def has_engineering_title(profile: dict) -> bool:
     for role in career_history:
         if isinstance(role, dict):
             titles.append((role.get("title", "") or "").strip().lower())
+        elif hasattr(role, "title"):
+            titles.append((role.title or "").strip().lower())
             
-    tokens = {"engineer", "developer", "scientist", "architect", "lead", "cto", "programmer"}
+    tech_tokens = {"engineer", "developer", "scientist", "architect", "lead", "cto", "programmer", "specialist", "expert"}
     for t in titles:
         if not t:
             continue
-        words = re.findall(r'\b\w+\b', t)
-        if any(w in tokens for w in words):
-            return True
-        if any(tok in t for tok in tokens):
+        # lowercase containment check with boundary check for "cto" to prevent substring bugs like in "sales director"
+        if any((tok in t if tok != "cto" else re.search(r'\bcto\b', t)) for tok in tech_tokens):
             return True
     return False
 
@@ -115,9 +115,12 @@ def credential_inflation_multiplier(profile: dict) -> float:
     current_title = (sub_prof.get("current_title", "") or "").strip().lower()
     try:
         yoe_val = sub_prof.get("years_of_experience")
-        yoe = float(yoe_val) if yoe_val is not None else 6.0
+        if yoe_val is None or str(yoe_val).strip() == "":
+            yoe = 0.0
+        else:
+            yoe = float(yoe_val)
     except (ValueError, TypeError):
-        yoe = 6.0
+        yoe = 0.0
     
     for word, floor in SENIORITY_FLOOR.items():
         if re.search(rf"\b{re.escape(word)}\b", current_title, re.IGNORECASE):
@@ -236,9 +239,12 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
     # 1. Experience Envelope Filter
     try:
         yoe_val = profile.get("years_of_experience")
-        yoe = float(yoe_val) if yoe_val is not None else 6.0
+        if yoe_val is None or str(yoe_val).strip() == "":
+            yoe = 0.0
+        else:
+            yoe = float(yoe_val)
     except (ValueError, TypeError):
-        yoe = 6.0
+        yoe = 0.0
 
     if 5.0 <= yoe <= 9.0:
         exp_score = 1.0
@@ -254,16 +260,27 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
     
     # 3. Core AI Stack Depth Match
     core_stack = ["python", "pytorch", "llm", "rag", "embeddings", "retrieval", "ranking", "vector", "qdrant", "transformers"]
-    skills_set = {s.get("name", "").lower() for s in skills if s and isinstance(s, dict) and s.get("name")}
     
-    text_pool = (profile.get("headline", "") + " " + profile.get("summary", "")).lower()
+    skills_lowercase = []
+    for s in skills:
+        if isinstance(s, dict):
+            name = s.get("name")
+            if name:
+                skills_lowercase.append(str(name).lower())
+        elif isinstance(s, str):
+            skills_lowercase.append(s.lower())
+            
+    text_pool = ((profile.get("headline", "") or "") + " " + (profile.get("summary", "") or "")).lower()
     for h in history:
         if isinstance(h, dict):
             text_pool += " " + (h.get("description", "") or "").lower()
+        elif hasattr(h, "description"):
+            text_pool += " " + (h.description or "").lower()
         
     matched_skills = []
     for token in core_stack:
-        if token in skills_set or any(token in s for s in skills_set) or token in text_pool:
+        skill_matched = any(token in s_name for s_name in skills_lowercase)
+        if skill_matched or (token in text_pool):
             matched_skills.append(token)
             
     skills_score = len(matched_skills) / len(core_stack)
@@ -274,15 +291,25 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
     # 4. Behavioral Signals Multiplier (Anti-Honeypot Shield)
     try:
         resp_val = signals.get("recruiter_response_rate")
-        response_rate = float(resp_val) if resp_val is not None else 0.80
+        if resp_val is None or str(resp_val).strip() == "":
+            response_rate = 1.0
+        else:
+            response_rate = float(resp_val)
+            if response_rate > 1.0:
+                response_rate /= 100.0
     except (ValueError, TypeError):
-        response_rate = 0.80
+        response_rate = 1.0
 
     try:
         comp_val = signals.get("interview_completion_rate")
-        completion_rate = float(comp_val) if comp_val is not None else 0.80
+        if comp_val is None or str(comp_val).strip() == "":
+            completion_rate = 1.0
+        else:
+            completion_rate = float(comp_val)
+            if completion_rate > 1.0:
+                completion_rate /= 100.0
     except (ValueError, TypeError):
-        completion_rate = 0.80
+        completion_rate = 1.0
 
     last_active = signals.get("last_active_date", "")
     
@@ -314,7 +341,9 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
     # Apply multipliers
     final_score = base_score * title_multiplier * duplicate_multiplier * cred_multiplier * behavior_multiplier
     if not is_dup:
-        final_score = max(final_score, 0.10)
+        final_score = max(0.05, final_score)
+    else:
+        final_score = 0.0
     final_score = round(final_score, 4)
     
     # Store intermediate multipliers on cand dictionary
@@ -592,6 +621,14 @@ if __name__ == "__main__":
 
     async def save_to_mongo(candidates):
         db = await get_database()
-        await _upsert_candidates(db, candidates, job_id="cli_run", source="cli")
+        from datetime import datetime, timezone
+        run_at = datetime.now(timezone.utc).isoformat()
+        await _upsert_candidates(
+            candidates,
+            job_id="cli_run",
+            run_at=run_at,
+            source="cli",
+            db=db
+        )
 
     asyncio.run(save_to_mongo(all_scored_candidates))

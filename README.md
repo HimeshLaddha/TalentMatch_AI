@@ -1,158 +1,145 @@
 # TalentMatch AI
 
-TalentMatch AI is a production-grade, high-performance candidate matching and ranking platform. It implements a **Two-Stage Retrieval & Re-ranking Architecture** using named multi-vectors, reciprocal rank fusion (RRF), and explainable AI (XAI) deep reranking to source and validate talent without PII bias.
+![CI](https://github.com/HimeshLaddha/TalentMatch_AI/actions/workflows/ci.yml/badge.svg)
+![Python](https://img.shields.io/badge/python-3.11-blue)
+![Next.js](https://img.shields.io/badge/next.js-14-black)
+![Tests](https://img.shields.io/badge/tests-31%20passing-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+> Production-grade talent intelligence platform that ranks 100,000+
+> candidate records in under 60 seconds. Built for the
+> **Redrob AI: India Runs Data & AI Challenge (Track 1)**.
 
 ---
 
-## 🌟 Architectural Features
+## What it does
 
-### 1. Job Intent Extraction (Phase 3)
-- Extracts structured parameters from unstructured job description inputs.
-- Prioritizes **Groq** (`llama-3.3-70b-versatile`), falling back to **OpenAI** (`gpt-4o-mini`) or **Gemini** (`gemini-2.5-pro`).
-- Recursively expands implicit stack keywords (e.g. MERN stack expansion) to capture auxiliary competencies.
-
-### 2. Multi-Vector Ingestion Pipeline (Phase 4)
-- **Vector Space A (`technical_skills`)**: Cosine dense vector index targeting candidate technical expertise.
-- **Vector Space B (`career_trajectory`)**: Cosine dense vector index encoding the chronological progression layout of the candidate's career.
-- **Lexical Sparse Space (`lexical_sparse`)**: SPLADE sparse representation capturing precise vertical domains and stack terms.
-- Local connection fallback: Automatically defaults to in-memory Qdrant storage (`:memory:`) if a dedicated server is unconfigured, allowing out-of-the-box local execution.
-
-### 3. Hybrid Dual-Space Retrieval (Phase 5)
-- Executes a 3-stream parallel search over technical skills, career progression, and lexical sparse indices.
-- Fuses result lists client-side using **Reciprocal Rank Fusion (RRF, k=60)** to shortlist the top candidates.
-
-### 4. Deep LLM Re-ranking & Explainable AI (Phases 6 & 7)
-- Sanitizes PII and demographic metadata to enforce unbiased scoring.
-- Scores candidates across four weighted dimensions:
-  - **Role Fit (40%)**: Directly checks technical competencies against requirements.
-  - **Career Trajectory (30%)**: Evaluates stability, promotions, progression scope, and tenure duration constraints.
-  - **Platform Signals (20%)**: Composites programmatic metrics (GitHub activity, pass rates, profile completion).
-  - **Domain Alignment (10%)**: Semantic vertical domain proximity (e.g. FinTech, SaaS).
-- Generates structured **XAI narratives** (Strongest Alignment, Gaps, and 3 Tailored Interview Prompts).
-- Integrates concurrency throttling (`asyncio.Semaphore(5)`) and rate-limit aware backoffs for APIs.
+TalentMatch AI ingests candidate files (PDF, DOCX, JSON, .jsonl.gz),
+scores every profile through a 6-guard heuristic engine fused with
+Qdrant vector search, and surfaces a ranked shortlist in a clean
+recruiter dashboard — with optional Job Description boosting that
+re-ranks candidates by `heuristic_score × jd_relevance`.
 
 ---
 
-## 🚀 Setup & Installation
+## Architecture overview
 
-### 1. Prerequisites
-- Python 3.10 or higher.
-- A virtual environment is highly recommended.
-
-### 2. Clone and Setup Environment
-Activate the environment and install dependencies:
-```bash
-# Initialize a virtual environment
-python -m venv .venv
-
-# Activate the virtual environment
-# On Windows (PowerShell):
-.venv\Scripts\Activate.ps1
-# On macOS/Linux:
-source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### 3. Configuration Setup
-Create a `.env` file from the provided example:
-```bash
-cp .env.example .env
-```
-Fill in the API keys for the LLM backends in `.env`:
-```env
-OPENAI_API_KEY=your-openai-api-key
-GEMINI_API_KEY=your-gemini-api-key
-GROQ_API_KEY=your-groq-api-key
-QDRANT_HOST=localhost
-QDRANT_PORT=6333
-```
-
-
-## 🏆 Hackathon Challenge Pipeline
-
-To run the automated candidate discovery, extraction, caching, and ranking pipeline for the India runs challenge job description:
-
-### 1. Execute the Pipeline Ingestion & Migration Harness
-The pipeline harness reads the target JD and candidate documents from the challenge folder, checks MD5 caching, archives raw and structured data to MongoDB Atlas, indexes candidate vectors in Qdrant, searches using client-side Reciprocal Rank Fusion (RRF, k=60), and scores the shortlist using the deep reranker.
-
-Run the pipeline using the following command (defaults to the 50 candidate sample):
-```bash
-# On Windows (PowerShell)
-$env:PYTHONPATH="backend"; .venv\Scripts\python backend/extract_challenge.py
-
-# On macOS/Linux
-PYTHONPATH=backend .venv/bin/python backend/extract_challenge.py
-```
-
-Options:
-- `--file <path>`: Path to candidate JSON/JSONL pool (e.g. `India_runs_data_and_ai_challenge/candidates.jsonl`).
-- `--limit <int>`: Cap the number of processed profiles (default `100`) to manage cloud rate limits and compute budget.
-- `--qdrant-local`: Force connection to local Qdrant server at `localhost:6333` instead of in-memory collection.
-
-### 2. View Compiled Outcomes
-After execution, the compiled report is written to:
-- [India_runs_final_leaderboard.md](file:///c:/Users/Admin/OneDrive/Desktop/TalentMatch_AI/India_runs_data_and_ai_challenge/India_runs_final_leaderboard.md)
-
-This file contains the final ranked candidate leaderboard table with individual sub-scores and edge-case behavior summaries, alongside detailed Explainable AI (XAI) fit profiles for the top 3 ranked candidates.
+TalentMatch AI utilizes a high-performance two-stage retrieval and re-ranking architecture. Stage 1 executes multi-vector hybrid retrieval (dense + sparse vector embeddings) using SPLADE indexing in Qdrant with Reciprocal Rank Fusion (RRF, k=60) to narrow candidate pools from 100,000+ down to the top-50. Stage 2 executes deep LLM re-ranking (Groq Llama-3.3 → OpenAI → Gemini fallback) utilizing anonymized candidate data and a 6-guard heuristic matrix to output final scores, detailed Explainable AI (XAI) rationale, and interview prompts. For the full system components diagram and data flow, please see the [ARCHITECTURE.md](ARCHITECTURE.md) document.
 
 ---
 
-## 🧪 Testing and Validation
+## Tech stack
 
+| Layer | Technology |
+|---|---|
+| Backend API | FastAPI (Python 3.11) |
+| Async workers | Celery + RabbitMQ |
+| Vector store | Qdrant (dense + sparse, RRF k=60) |
+| Database | MongoDB Atlas (Motor async driver) |
+| Cache / broker backend | Redis |
+| Embeddings | fastembed (SPLADE sparse + dense) |
+| LLM layer | Groq → OpenAI → Gemini fallback chain |
+| Frontend | Next.js 14 + TypeScript |
+| Auth | JWT (FastAPI security) |
+| CI | GitHub Actions |
+| Containerisation | Docker Compose (7 services) |
 
-### 1. Standalone Integration Script (`run_pipeline_check.py`)
-Run the unified validation script to verify the entire pipeline end-to-end with zero configurations (it will use in-memory fallbacks out-of-the-box):
+---
+
+## Heuristic scoring guards
+
+1. **Experience Envelope Filter**: Verifies that the candidate's years of experience falls within the senior threshold, applying linear decay penalties for out-of-range YoE.
+2. **Role Title Verification**: Uses boundary-specific regex matches to verify core role titles, minimizing false positive matches from sub-strings.
+3. **Behavioral Multiplier**: Eliminates honey-pot records by penalizing low recruiter response rates and completion statistics in `redrob_signals`.
+4. **Credential Inflation Detector**: Evaluates candidate seniority tiers and demotes inflated claims against strict YoE floors.
+5. **Skill Recency Decay**: Evaluates technical skills using an exponential decay half-life of 4.6 years from their last used date.
+6. **Fuzzy Duplicate Identity**: Compares SHA-256 hashes of standardized name, email, and phone info to filter duplicate profiles.
+
+---
+
+## Supported file formats
+
+| Format | Parsing method |
+|---|---|
+| .jsonl.gz | Native stream parser (row-by-row, 43s for 100k) |
+| .json | Direct schema map (single object or batch array) |
+| PDF | pdfplumber → text → LLM field extraction |
+| DOCX | python-docx → text → LLM field extraction |
+
+---
+
+## Quick start
+
+### Prerequisites
+- Docker + Docker Compose
+- Python 3.11
+- Node.js 20
+
+### Run with Docker
 ```bash
-python run_pipeline_check.py
+git clone https://github.com/HimeshLaddha/TalentMatch_AI
+cd TalentMatch_AI
+cp .env.example .env   # fill in your API keys
+docker-compose up --build
+
+# Frontend: http://localhost:3000
+# API docs: http://localhost:8000/docs
+# RabbitMQ: http://localhost:15672
 ```
-This runs the entire lifecycle (parsing, multi-vector ingestion, hybrid RRF retrieval, batch re-ranking) over **6 edge-case candidate archetypes** and outputs a high-precision console Markdown Table:
+
+### Run the hackathon scoring pipeline
+```bash
+PYTHONPATH=backend python backend/extract_challenge.py
+# Scores 100,000 candidates → submission/submission.csv
+```
+
+### Run tests
+```bash
+cd backend && pytest tests/ -v
+# 31 tests, ~12 seconds
+```
+
+---
+
+## Environment variables
+
+See .env.example for all required keys. Never commit .env.
+
+Key variables:
+```text
+  MONGO_URI          — MongoDB Atlas connection string
+  REDIS_URL          — Redis (Celery result backend)
+  RABBITMQ_URL       — RabbitMQ (Celery broker)
+  GROQ_API_KEY       — Primary LLM for XAI + resume parsing
+  GEMINI_API_KEY     — Fallback LLM
+  JWT_SECRET         — Auth token signing key
+  ADMIN_PASSWORD     — Admin dashboard access
+```
+
+---
+
+## Project structure
 
 ```text
-| Rank | Candidate ID    | Final Score | Role Fit (40%) | Trajectory (30%) | Platform (20%) | Domain (10%) | Edge-Case Match Behavior Summary                                         |
-| ---- | --------------- | ----------- | -------------- | ---------------- | -------------- | ------------ | ------------------------------------------------------------------------ |
-| 1    | cand_ideal_01   | 0.9592      | 0.9800         | 0.9200           | 0.9560         | 1.0000       | Ideal fit: matches Senior MERN + FinTech domain with high platform signals. |
-| 2    | cand_low_tenure_06 | 0.8572      | 0.9500         | 0.6000           | 0.9860         | 1.0000       | High signal/low tenure: Perfect metrics, but low tenure decays trajectory. |
+  TalentMatch_AI/
+  ├── backend/
+  │   ├── app/                    # FastAPI application
+  │   │   ├── api/v1/endpoints/   # pipeline, candidates, auth
+  │   │   └── main.py
+  │   ├── parsers/                # format_router, extractors
+  │   ├── tasks/                  # Celery app + pipeline chain
+  │   ├── tests/                  # 31 pytest tests
+  │   ├── extract_challenge.py    # hackathon CLI entry point
+  │   └── database.py             # MongoDB upsert helpers
+  ├── frontend/
+  │   └── app/
+  │       ├── dashboard/          # rankings + JD panel
+  │       ├── candidates/         # full candidate database
+  │       ├── upload/             # multi-format drag-and-drop
+  │       └── admin/              # admin workspace
+  ├── submission/                 # hackathon output artefacts
+  ├── docker-compose.yml
+  ├── .env.example
+  ├── ARCHITECTURE.md
+  └── README.md
 ```
-
-### 2. Automated Tests
-Run the unit and integration test suite using `pytest`:
-```bash
-pytest tests/test_services.py
-```
-
-### 3. Running the FastAPI Application
-To start the backend development server:
-```bash
-# Navigate to the backend directory
-cd backend
-
-# Start the development server
-uvicorn app.main:app --reload
-```
-Access the interactive documentation at:
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
-
-### 🔑 Admin Authentication
-Certain backend endpoints (such as `GET /api/v1/profiles/directory`) require administrative authentication:
-- **Login Endpoint:** `POST /api/v1/profiles/login`
-- **JSON Payload:** `{"password": "<value of ADMIN_PASSWORD env var>"}`
-- **Admin Password:** Set via the `ADMIN_PASSWORD` environment variable (see `.env.example`)
-- On successful authentication, the server returns a signed JWT token. Supply this token as a Bearer token in the `Authorization` header (`Authorization: Bearer <token>`) for subsequent secured API calls.
-
-### 💻 Running the Frontend Application
-To start the React/TypeScript frontend development server:
-```bash
-# Navigate to the frontend directory
-cd frontend
-
-# Install dependencies (if not already done)
-npm install
-
-# Start Vite dev server
-npm run dev
-```
-The frontend is available locally at: `http://localhost:5173` (or the port specified in the Vite console output).
-
