@@ -190,6 +190,36 @@ def is_fuzzy_duplicate(profile: dict) -> bool:
     _seen_identity_keys.add(key)
     return False
 
+def tokenise_jd(jd_text: str) -> set[str]:
+    STOPWORDS = {
+        "a","an","the","and","or","with","for","to","of","in","is",
+        "are","be","as","at","by","from","on","we","you","our","your",
+        "will","can","this","that","have","has","not","but","also",
+        "their","they","it","its","strong","good","experience",
+        "years","role","team","work","working","ability","looking",
+        "must","should","would","please","required","preferred"
+    }
+    tokens = set(re.findall(r'\b\w+\b', jd_text.lower()))
+    return tokens - STOPWORDS
+
+def jd_relevance_score(profile: dict, jd_tokens: set[str]) -> float:
+    """
+    Returns multiplier in [0.5, 1.0].
+    Returns 1.0 if jd_tokens is empty (no JD = no adjustment).
+    """
+    if not jd_tokens:
+        return 1.0
+
+    candidate_text = " ".join([
+        profile.get("current_title", "") or "",
+        " ".join(s.get("name", "") or "" for s in profile.get("skills", []) if s),
+        " ".join(r.get("title", "") or "" for r in profile.get("career_history", []) if r),
+    ]).lower()
+
+    candidate_tokens = set(re.findall(r'\b\w+\b', candidate_text))
+    overlap = len(candidate_tokens & jd_tokens) / max(len(jd_tokens), 1)
+    return round(0.5 + (overlap * 0.5), 4)
+
 # ---------------------------------------------------------------------------
 # Guarded Heuristic Scoring Engine
 # ---------------------------------------------------------------------------
@@ -513,13 +543,55 @@ async def run_pipeline():
     # Ingestion + Scoring — delegate to score_all() to avoid logic duplication
     # ---------------------------------------------------------------------------
     try:
-        top_100 = score_all(CANDIDATES_GZ)
+        top_100, all_candidates = score_all(CANDIDATES_GZ, return_all=True)
     except FileNotFoundError:
         logger.critical("No candidate datasets were found inside the official challenge directory.")
         sys.exit(1)
 
     logger.info(f"Successfully loaded and scored candidates; top_100 has {len(top_100)} entries.")
-    logger.info("Pipeline run successfully complete (in-memory mode, file writing skipped).")
+    
+    # Write submission.csv
+    import csv
+    with open(SUBMISSION_CSV, "w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["candidate_id", "rank", "score", "reasoning"])
+        for cand in top_100:
+            writer.writerow([
+                cand["candidate_id"],
+                cand["rank"],
+                cand["score"],
+                cand.get("reasoning", "") if cand.get("rank", 999) <= 3 else ""
+            ])
+    logger.info(f"Successfully wrote submission.csv to {SUBMISSION_CSV}")
+
+    # Validate submission.csv
+    try:
+        if BASE_DIR not in sys.path:
+            sys.path.insert(0, BASE_DIR)
+        from validate_submission import validate_submission as check_sub
+        errors = check_sub(SUBMISSION_CSV)
+        if errors:
+            logger.error(f"Submission CSV validation failed: {errors}")
+        else:
+            logger.info("Submission CSV validation passed successfully.")
+    except Exception as err:
+        logger.error(f"Could not run validate_submission: {err}")
+
+    logger.info("Pipeline run successfully complete.")
+    return all_candidates
 
 if __name__ == "__main__":
-    asyncio.run(run_pipeline())
+    _BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+    if _BACKEND_DIR not in sys.path:
+        sys.path.insert(0, _BACKEND_DIR)
+
+    all_scored_candidates = asyncio.run(run_pipeline())
+
+    # After submission.csv is written and validated:
+    from app.database import get_database, _upsert_candidates
+
+    async def save_to_mongo(candidates):
+        db = await get_database()
+        await _upsert_candidates(db, candidates, job_id="cli_run", source="cli")
+
+    asyncio.run(save_to_mongo(all_scored_candidates))
