@@ -7,27 +7,6 @@ from app.schemas.candidate import CandidateProfile
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# LLM Schema Sanitization Helper for Gemini
-# ---------------------------------------------------------------------------
-def _get_sanitized_gemini_schema(model) -> dict:
-    from google.generativeai.types.content_types import _schema_for_class
-    schema = _schema_for_class(model)
-    
-    def sanitize(item):
-        if isinstance(item, dict):
-            cleaned = {}
-            for k, v in item.items():
-                if k in ("minimum", "maximum", "pattern", "minLength", "maxLength", "exclusiveMinimum", "exclusiveMaximum"):
-                    continue
-                cleaned[k] = sanitize(v)
-            return cleaned
-        elif isinstance(item, list):
-            return [sanitize(x) for x in item]
-        else:
-            return item
-            
-    return sanitize(schema)
 
 # ---------------------------------------------------------------------------
 # Token-Saving Narrative Text Compression Pass
@@ -275,12 +254,11 @@ class JobParserService:
         # Initialize Gemini if configured
         if settings.GEMINI_API_KEY:
             try:
-                import google.generativeai as genai
-                genai.configure(api_key=settings.GEMINI_API_KEY)
+                import google.genai as genai
                 self._gemini_configured = True
                 logger.info("JobParserService initialized with Gemini configuration.")
             except ImportError:
-                logger.error("google-generativeai import failed while initializing JobParserService.")
+                logger.error("google-genai import failed while initializing JobParserService.")
 
     async def parse_job_description(self, raw_text: str) -> ParsedJobIntent:
         """
@@ -404,25 +382,23 @@ class JobParserService:
         # 3. Try Gemini if configured
         if self._gemini_configured:
             try:
-                logger.info("Attempting job parsing using Gemini gemini-1.5-flash...")
-                import google.generativeai as genai
+                logger.info("Attempting job parsing using Gemini gemini-2.5-flash...")
+                import google.genai as genai
+                from google.genai import types
                 import asyncio
                 
-                model = genai.GenerativeModel(
-                    model_name="gemini-1.5-flash",
-                    system_instruction=system_instructions
-                )
+                client = genai.Client(api_key=settings.GEMINI_API_KEY)
                 
                 loop = asyncio.get_running_loop()
                 
-                sanitized_schema = _get_sanitized_gemini_schema(ParsedJobIntent)
-
                 def make_gemini_call():
-                    return model.generate_content(
-                        f"Parse the following job description:\n\n{raw_text}",
-                        generation_config=genai.types.GenerationConfig(
+                    return client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=f"Parse the following job description:\n\n{raw_text}",
+                        config=types.GenerateContentConfig(
+                            system_instruction=system_instructions,
                             response_mime_type="application/json",
-                            response_schema=sanitized_schema,
+                            response_schema=ParsedJobIntent,
                             temperature=0.0
                         )
                     )
@@ -529,26 +505,23 @@ class JobParserService:
             # 3. Try Gemini if configured
             if self._gemini_configured:
                 try:
-                    logger.info("Attempting candidate parsing using Gemini gemini-1.5-flash...")
-                    import google.generativeai as genai
+                    logger.info("Attempting candidate parsing using Gemini gemini-2.5-flash...")
+                    import google.genai as genai
+                    from google.genai import types
                     import asyncio
 
-                    model = genai.GenerativeModel(
-                        model_name="gemini-1.5-flash",
-                        system_instruction=system_instructions
-                    )
+                    client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
                     loop = asyncio.get_running_loop()
-                    
-                    # Sanitize schema for Gemini (removing minimum, maximum, pattern to prevent API 422 drops)
-                    sanitized_schema = _get_sanitized_gemini_schema(CandidateProfile)
 
                     def make_gemini_call():
-                        return model.generate_content(
-                            f"Parse the following resume text:\n\n{compressed_text}",
-                            generation_config=genai.types.GenerationConfig(
+                        return client.models.generate_content(
+                            model="gemini-2.5-flash",
+                            contents=f"Parse the following resume text:\n\n{compressed_text}",
+                            config=types.GenerateContentConfig(
+                                system_instruction=system_instructions,
                                 response_mime_type="application/json",
-                                response_schema=sanitized_schema,
+                                response_schema=CandidateProfile,
                                 temperature=0.0
                             )
                         )

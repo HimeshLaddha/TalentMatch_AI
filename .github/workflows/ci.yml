@@ -39,7 +39,7 @@ jobs:
           GROQ_API_KEY: "dummy"
           OPENAI_API_KEY: "dummy"
           GEMINI_API_KEY: "dummy"
-          JWT_SECRET: "ci_test_secret_32_chars_minimum"
+          JWT_SECRET: "ci_test_secret_exactly_32_chars!"
 
       - name: Run API endpoint tests
         run: pytest tests/test_api_endpoints.py -v
@@ -52,7 +52,7 @@ jobs:
           GROQ_API_KEY: "dummy"
           OPENAI_API_KEY: "dummy"
           GEMINI_API_KEY: "dummy"
-          JWT_SECRET: "ci_test_secret_32_chars_minimum"
+          JWT_SECRET: "ci_test_secret_exactly_32_chars!"
 
       - name: Run pipeline invariant check
         run: PYTHONPATH=. python run_pipeline_check.py --sample-only
@@ -62,7 +62,7 @@ jobs:
           REDIS_URL: "redis://localhost:6379"
           GROQ_API_KEY: "dummy"
           GEMINI_API_KEY: "dummy"
-          JWT_SECRET: "ci_test_secret_32_chars_minimum"
+          JWT_SECRET: "ci_test_secret_exactly_32_chars!"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Job 2: Frontend — lint + build
