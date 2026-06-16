@@ -9,13 +9,18 @@ export interface Candidate {
   reasoning: string;
   years_of_experience: number;
   current_title: string;
+  last_score?: number;
+  final_score?: number;
+  jd_multiplier?: number;
+  jd_match_pct?: number;
 }
 
 interface LeaderboardProps {
   candidates: Candidate[];
+  jdActive?: boolean;
 }
 
-export default function Leaderboard({ candidates }: LeaderboardProps) {
+export default function Leaderboard({ candidates, jdActive }: LeaderboardProps) {
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
 
@@ -38,6 +43,7 @@ export default function Leaderboard({ candidates }: LeaderboardProps) {
               <th className="p-3 pl-4 font-medium">Rank</th>
               <th className="p-3 font-medium">Candidate</th>
               <th className="p-3 font-medium">Score</th>
+              {jdActive && <th className="p-3 font-medium">JD Match</th>}
               <th className="p-3 font-medium">Experience</th>
               <th className="p-3 pr-4 font-medium text-right">Action</th>
             </tr>
@@ -46,6 +52,12 @@ export default function Leaderboard({ candidates }: LeaderboardProps) {
             {candidates.map((cand) => {
               const isTop3 = cand.rank <= 3;
               const isRank1 = cand.rank === 1;
+
+              const displayScore = jdActive && cand.final_score != null
+                ? cand.final_score
+                : (cand.last_score ?? cand.score);
+
+              const baseScore = cand.last_score ?? cand.score;
 
               return (
                 <tr key={cand.candidate_id} className="hover:bg-tm-surface/50 transition-colors">
@@ -74,18 +86,49 @@ export default function Leaderboard({ candidates }: LeaderboardProps) {
 
                   {/* Score Column */}
                   <td className="p-3">
-                    <div className="flex items-center gap-3 w-[150px]">
-                      <div className="flex-1 h-2 bg-zinc-100 rounded-[2px] overflow-hidden">
-                        <div
-                          className="h-full bg-tm-accent"
-                          style={{ width: `${Math.min(1.0, Math.max(0.0, cand.score)) * 100}%` }}
-                        />
+                    <div className="flex flex-col gap-0.5 justify-center">
+                      <div className="flex items-center gap-3 w-[150px]">
+                        <div className="flex-1 h-2 bg-zinc-100 rounded-[2px] overflow-hidden">
+                          <div
+                            className="h-full bg-tm-accent"
+                            style={{ width: `${Math.min(1.0, Math.max(0.0, displayScore)) * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-[12px] font-mono text-tm-text w-8 text-right shrink-0">
+                          {displayScore.toFixed(2)}
+                        </span>
                       </div>
-                      <span className="text-[12px] font-mono text-tm-text w-8 text-right shrink-0">
-                        {cand.score.toFixed(2)}
-                      </span>
+                      {jdActive && baseScore != null && (
+                        <span className="text-[10px] text-tm-muted pl-1">
+                          base: {baseScore.toFixed(2)}
+                        </span>
+                      )}
                     </div>
                   </td>
+
+                  {/* JD Match Column */}
+                  {jdActive && (
+                    <td className="p-3">
+                      {cand.jd_match_pct != null ? (
+                        (() => {
+                          const pct = cand.jd_match_pct;
+                          let pillClass = "bg-zinc-100 text-zinc-700 border-zinc-200/50";
+                          if (pct >= 31 && pct <= 60) {
+                            pillClass = "bg-amber-50 text-amber-700 border-amber-200/50";
+                          } else if (pct >= 61) {
+                            pillClass = "bg-emerald-50 text-emerald-700 border-emerald-200/50";
+                          }
+                          return (
+                            <span className={`inline-block text-[11px] px-2 py-0.5 border rounded-[20px] font-medium ${pillClass}`}>
+                              {pct}%
+                            </span>
+                          );
+                        })()
+                      ) : (
+                        <span className="text-[11px] text-tm-muted">—</span>
+                      )}
+                    </td>
+                  )}
 
                   {/* Experience Column */}
                   <td className="p-3">

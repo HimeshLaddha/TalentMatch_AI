@@ -169,3 +169,13 @@ def test_status_endpoint_streams_sse(
             assert "progress" in payload, f"SSE payload missing 'progress' key: {payload}"
             assert "detail" in payload, f"SSE payload missing 'detail' key: {payload}"
             break
+
+
+def test_candidates_endpoint_exists(client: TestClient) -> None:
+    """
+    GET /api/v1/candidates must return 200 or 401 (if authentication is required),
+    but not 404.
+    """
+    response = client.get("/api/v1/candidates")
+    assert response.status_code in (200, 401)
+

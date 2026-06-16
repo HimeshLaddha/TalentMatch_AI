@@ -162,137 +162,81 @@ async def pipeline_status(task_id: str) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 # POST /api/v1/pipeline/rerank
 # ---------------------------------------------------------------------------
-class RerankRequest(BaseModel):
+class JDRerankRequest(BaseModel):
     job_id: str
-    weights: dict
+    jd_text: str = ""
 
-@router.post(
-    "/rerank",
-    summary="Re-aggregate candidate scores with new weights and output updated rankings",
-)
-async def rerank_pipeline(payload: RerankRequest):
+@router.post("/rerank")
+async def rerank_by_jd(payload: JDRerankRequest, db=Depends(get_mongo_db)):
     """
-    Re-aggregates candidate scores using new weight coefficients (experience, skills, signals).
-    Re-writes submission.csv and updates the MongoDB rankings collection.
+    Re-ranks candidates by: last_score × jd_relevance_score.
+    If jd_text is empty, order is identical to original heuristic rank.
+    Returns top 100.
     """
-    job_id = payload.job_id
-    weights = payload.weights
-    
-    # Check that weights sum to 100
-    if sum(weights.values()) != 100:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Weights must sum to exactly 100."
-        )
-        
-    scores_file = os.path.join(_TMP_BASE, job_id, "scores.json")
-    if not os.path.exists(scores_file):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Intermediate scores file not found for job_id: {job_id}"
-        )
-        
-    try:
-        with open(scores_file, "r", encoding="utf-8") as f:
-            candidates = json.load(f)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to read candidate intermediate scores: {e}"
-        )
-        
-    # Re-calculate scores using new weight coefficients
-    w_exp = weights.get("experience", 40) / 100.0
-    w_skills = weights.get("skills", 40) / 100.0
-    w_signals = weights.get("signals", 20) / 100.0
-    
-    scored = []
-    for cand in candidates:
-        skills_score = cand.get("role_fit", 0.0)
-        exp_score = cand.get("trajectory", 0.0)
-        signals_score = cand.get("platform_signals", 0.0)
-        
-        base_score = (skills_score * w_skills) + (exp_score * w_exp) + (signals_score * w_signals)
-        
-        title_multiplier = cand.get("title_multiplier", 1.0)
-        duplicate_multiplier = cand.get("duplicate_multiplier", 1.0)
-        cred_multiplier = cand.get("cred_multiplier", 1.0)
-        behavior_multiplier = cand.get("behavior_multiplier", 1.0)
-        
-        final_score = base_score * title_multiplier * duplicate_multiplier * cred_multiplier * behavior_multiplier
-        final_score = round(final_score, 4)
-        
-        scored.append({
-            "candidate_id": cand["candidate_id"],
-            "score": final_score,
-            "sub_scores": {
-                "role_fit": skills_score,
-                "trajectory": exp_score,
-                "platform_signals": signals_score,
-                "domain_alignment": cand.get("domain_alignment", 0.5)
-            },
-            "reasoning": "",
-            "xai": cand.get("xai", {}),
-            "years_of_experience": cand.get("years_of_experience", 0),
-            "current_title": cand.get("current_title", "")
-        })
-        
-    # Sort descending by score, tiebreak with candidate_id lexicographically
-    scored.sort(key=lambda x: (-x["score"], x["candidate_id"]))
-    top_100 = scored[:100]
-    for rank, cand in enumerate(top_100, 1):
-        cand["rank"] = rank
-        
-    # Regenerate XAI reasoning for new top-3
-    top_100 = call_llm_xai(top_100)
-    
-    # Update reasoning on top_100 candidate dicts
-    for cand in top_100:
-        if cand["rank"] <= 3:
-            cand["reasoning"] = cand.get("xai_narrative", "")
-        else:
-            cand["reasoning"] = ""
-            
-    # Writing submission.csv skipped to run purely in-memory
+    from extract_challenge import tokenise_jd, jd_relevance_score
+    jd_tokens = tokenise_jd(payload.jd_text)
 
-    # Save to MongoDB rankings collection
-    try:
-        db = get_mongo_db()
-        candidates_data = []
-        for cand in top_100:
-            candidates_data.append({
-                "candidate_id": cand["candidate_id"],
-                "rank": cand["rank"],
-                "score": cand["score"],
-                "reasoning": cand["reasoning"],
-                "years_of_experience": cand["years_of_experience"],
-                "current_title": cand["current_title"]
-            })
-            
-        doc = {
-            "job_id": job_id,
-            "run_at": datetime.now(timezone.utc).isoformat(),
-            "total_scored": len(candidates),
-            "candidates": candidates_data
-        }
-        
-        # Preserve original runtime_seconds
-        existing = await db.rankings.find_one({"job_id": job_id})
-        if existing:
-            doc["runtime_seconds"] = existing.get("runtime_seconds", 0)
-            doc["run_at"] = existing.get("run_at", doc["run_at"])
-        else:
-            doc["runtime_seconds"] = 0
-            
-        await db.rankings.update_one(
-            {"job_id": job_id},
-            {"$set": doc},
-            upsert=True
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to persist re-ranked results to MongoDB: {e}"
-        )
-        
-    return top_100
+    cursor = db["candidates"].find(
+        {"last_run_id": payload.job_id},
+        {"_id": 0, "candidate_id": 1, "current_title": 1,
+         "years_of_experience": 1, "last_score": 1,
+         "skills": 1, "career_history": 1}
+    )
+    candidates = await cursor.to_list(length=100000)
+
+    # Fallback: if candidates list is empty, fetch the candidates using the active rankings document.
+    # This ensures that seeded datasets (whose candidates might not have last_run_id matching the ranking run's job_id)
+    # can still be loaded and reranked.
+    if not candidates:
+        ranking_doc = await db["rankings"].find_one({"job_id": payload.job_id})
+        if ranking_doc and "candidates" in ranking_doc:
+            ranking_candidates = ranking_doc["candidates"]
+            ranking_scores = {c["candidate_id"]: c["score"] for c in ranking_candidates if "candidate_id" in c}
+            candidate_ids = list(ranking_scores.keys())
+
+            cursor = db["candidates"].find(
+                {"candidate_id": {"$in": candidate_ids}},
+                {"_id": 0, "candidate_id": 1, "current_title": 1,
+                 "years_of_experience": 1, "last_score": 1,
+                 "skills": 1, "career_history": 1}
+            )
+            fetched_candidates = await cursor.to_list(length=100000)
+            fetched_map = {c["candidate_id"]: c for c in fetched_candidates}
+
+            candidates = []
+            for rc in ranking_candidates:
+                cid = rc.get("candidate_id")
+                if not cid:
+                    continue
+                if cid in fetched_map:
+                    c = fetched_map[cid]
+                else:
+                    c = {
+                        "candidate_id": cid,
+                        "current_title": rc.get("current_title", ""),
+                        "years_of_experience": rc.get("years_of_experience", 0),
+                        "last_score": rc.get("score", 0.0),
+                        "skills": [],
+                        "career_history": []
+                    }
+                c["last_score"] = rc.get("score", c.get("last_score", 0.0))
+                candidates.append(c)
+
+    for c in candidates:
+        jd_mult = jd_relevance_score(c, jd_tokens)
+        c["final_score"]    = round(c.get("last_score", 0) * jd_mult, 6)
+        c["jd_multiplier"]  = jd_mult
+        c["jd_match_pct"]   = round((jd_mult - 0.5) * 200)
+
+    # Sort: final_score desc, then candidate_id asc for ties
+    candidates.sort(key=lambda x: (-x["final_score"], x["candidate_id"]))
+
+    for i, c in enumerate(candidates):
+        c["rank"] = i + 1
+
+    return {
+        "job_id":          payload.job_id,
+        "jd_active":       bool(payload.jd_text),
+        "jd_token_count":  len(jd_tokens),
+        "candidates":      candidates[:100],
+    }

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import MetricsRow, { MetricCardData } from "@/components/MetricsRow";
 import PipelineProgress from "@/components/PipelineProgress";
 import Leaderboard, { Candidate } from "@/components/Leaderboard";
-import WeightSliders from "@/components/WeightSliders";
+import JDPanel from "@/components/JDPanel";
 import UploadPanel from "@/components/UploadPanel";
 import { loginAdmin } from "@/lib/api";
 
@@ -33,6 +33,10 @@ export default function DashboardPage() {
   // Current Dashboard Data
   const [runData, setRunData] = useState<JobRunData | null>(null);
   const [loadingLatest, setLoadingLatest] = useState<boolean>(false);
+
+  // JD Relevance States
+  const [jdActive, setJdActive] = useState<boolean>(false);
+  const [jdTokenCount, setJdTokenCount] = useState<number>(0);
 
   // Initialize Auth
   useEffect(() => {
@@ -114,8 +118,14 @@ export default function DashboardPage() {
     }
   };
 
-  // Weight Sliders Rerank Handler
-  const handleRerankSuccess = (newCandidates: Candidate[]) => {
+  // JD Panel Rerank Handler
+  const handleRerankSuccess = (
+    newCandidates: Candidate[],
+    active: boolean,
+    tokenCount: number
+  ) => {
+    setJdActive(active);
+    setJdTokenCount(tokenCount);
     if (runData) {
       setRunData({
         ...runData,
@@ -247,7 +257,15 @@ export default function DashboardPage() {
                     <span>Rankings based on Job {runData.job_id}</span>
                     <span>Executed on {new Date(runData.run_at).toLocaleString()}</span>
                   </div>
-                  <Leaderboard candidates={runData.candidates} />
+                  {jdActive && (
+                    <div 
+                      style={{ backgroundColor: "#FFFBEB", border: "0.5px solid #FDE68A" }} 
+                      className="text-[12px] py-2 px-4 rounded-[8px] text-amber-800 font-medium"
+                    >
+                      Ranked by heuristic score × JD relevance · {jdTokenCount} keywords matched
+                    </div>
+                  )}
+                  <Leaderboard candidates={runData.candidates} jdActive={jdActive} />
                 </div>
               )}
             </div>
@@ -264,7 +282,7 @@ export default function DashboardPage() {
               )}
 
               {runData && (
-                <WeightSliders
+                <JDPanel
                   jobId={runData.job_id}
                   onRerank={handleRerankSuccess}
                 />
