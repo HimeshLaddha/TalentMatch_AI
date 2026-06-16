@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  matchJobDescription,
   triggerDatabaseRecoverySync,
   getStoredCandidatesDirectory,
   RecoverySyncResponse,
@@ -12,7 +11,33 @@ import {
   evaluateAndSync,
   getExportCsvUrl,
 } from "@/lib/api";
-import { CandidateMatch, MatchResponse } from "@/types";
+import { CandidateMatch } from "@/types";
+
+interface AdminCareerHistory {
+  title?: string;
+  years?: number;
+  company?: string;
+  description?: string;
+}
+
+interface AdminSkill {
+  name?: string;
+}
+
+interface MatchLeaderboardCandidate {
+  candidate_id: string;
+  name: string;
+  current_title?: string;
+  years_of_experience?: number;
+  last_score?: number;
+  jd_score: number;
+  jd_match_pct: number;
+  jd_multiplier?: number;
+  skills?: (string | AdminSkill)[];
+  career_history?: AdminCareerHistory[];
+  reasoning?: string;
+  rank: number;
+}
 
 // ---------------------------------------------------------------------------
 // Recovery sync status shape for the UI badge
@@ -116,14 +141,13 @@ export default function AdminDashboard() {
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [matchData, setMatchData] = useState<MatchResponse | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<CandidateMatch | null>(null);
 
   const [topN, setTopN] = useState<number>(25);
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<MatchLeaderboardCandidate[]>([]);
   const [scoredCount, setScoredCount] = useState<number>(0);
   const [jdTokenCount, setJdTokenCount] = useState<number>(0);
-  const [selected, setSelected] = useState<any>(null);
+  const [selected, setSelected] = useState<MatchLeaderboardCandidate | null>(null);
 
   const [activeDetailTab, setActiveDetailTab] = useState<"all" | "fit" | "gaps" | "prompts">("all");
   const [syncState, setSyncState] = useState<SyncState>({ phase: "idle" });
@@ -146,11 +170,6 @@ export default function AdminDashboard() {
       try {
         const evalResult = await evaluateAndSync();
         if (evalResult && evalResult.leaderboard) {
-          const matchResponse: MatchResponse = {
-            matches: evalResult.leaderboard,
-            total_scored: evalResult.total_evaluated
-          };
-          setMatchData(matchResponse);
           if (evalResult.leaderboard.length > 0) {
             setSelectedCandidate(evalResult.leaderboard[0]);
           }
@@ -266,7 +285,6 @@ export default function AdminDashboard() {
   const handleLogout = () => {
     localStorage.removeItem("token");
     setToken(null);
-    setMatchData(null);
     setSelectedCandidate(null);
     setSelectedDirectoryCandidate(null);
     setDirectoryData(null);
@@ -277,18 +295,7 @@ export default function AdminDashboard() {
     setSelected(null);
   };
 
-  const formatScore = (val: number): string => {
-    const scale = val <= 1.0 ? 100 : 1;
-    return `${Math.round(val * scale)}`;
-  };
 
-  const getScoreColorClass = (scoreStr: string): string => {
-    const score = parseInt(scoreStr, 10);
-    if (score >= 85) return "text-emerald-700 bg-emerald-50 border-emerald-100";
-    if (score >= 70) return "text-sky-700 bg-sky-50 border-sky-100";
-    if (score >= 50) return "text-amber-700 bg-amber-50 border-amber-150";
-    return "text-rose-700 bg-rose-50 border-rose-100";
-  };
 
   if (!isInitialized) {
     return (
@@ -622,7 +629,7 @@ export default function AdminDashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-tm-border/60">
-                        {results.map((c, i) => {
+                        {results.map((c) => {
                           const isSelected = selected?.candidate_id === c.candidate_id;
 
                           return (
@@ -861,7 +868,7 @@ export default function AdminDashboard() {
                   </h3>
                   <div className="flex flex-wrap gap-1.5">
                     {selected.skills && selected.skills.length > 0 ? (
-                      selected.skills.map((s: any, idx: number) => {
+                      selected.skills.map((s: string | AdminSkill, idx: number) => {
                         const sName = typeof s === 'string' ? s : s?.name || "";
                         if (!sName) return null;
                         return (
@@ -882,7 +889,7 @@ export default function AdminDashboard() {
                   </h3>
                   <div className="space-y-3 max-h-48 overflow-y-auto pr-1 scrollbar-thin">
                     {selected.career_history && selected.career_history.length > 0 ? (
-                      selected.career_history.map((job: any, idx: number) => (
+                      selected.career_history.map((job: AdminCareerHistory, idx: number) => (
                         <div key={idx} className="border-l-2 border-tm-border pl-3 py-0.5 space-y-1">
                           <div className="flex justify-between items-start text-xs">
                             <span className="font-semibold text-tm-text">{job.title || "Unknown Title"}</span>
