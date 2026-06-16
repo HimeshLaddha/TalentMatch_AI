@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
-import re, math, os
-from motor.motor_asyncio import AsyncIOMotorClient
+import re, os
 from app.core.config import settings
 
 router = APIRouter()
@@ -74,14 +73,13 @@ async def analyze_jd(payload: AnalyzeRequest):
     ])
     jd_tokens = tokenise_jd(combined_jd)
 
-    # Fetch ALL candidates from MongoDB
-    # (filter to only those with a real score)
-    uri = os.environ.get("MONGO_URI") or os.environ.get("MONGODB_URI") or settings.MONGO_URI or settings.MONGODB_URI
-    client = AsyncIOMotorClient(uri)
+    # Reuse the shared app-level MongoDB connection (avoids opening a new
+    # Motor client on every request which exhausts connection pool slots).
+    from app.api.v1.endpoints.profiles import get_mongo_db
     try:
-        db = client[os.getenv("MONGO_DB_NAME", "talentmatch")]
+        db = get_mongo_db()
         cursor = db["candidates"].find(
-            {"last_score": {"$gt": 0}},
+            {"last_score": {"$gt": 0.0}},
             {
                 "_id": 0,
                 "candidate_id": 1,
@@ -95,8 +93,11 @@ async def analyze_jd(payload: AnalyzeRequest):
             }
         )
         all_candidates = await cursor.to_list(length=200000)
-    finally:
-        client.close()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Database unavailable: {exc}",
+        )
 
     if not all_candidates:
         return {

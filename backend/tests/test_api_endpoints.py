@@ -182,3 +182,67 @@ def test_candidates_endpoint_exists(client: TestClient) -> None:
         f"A 500 means an unhandled exception — wrap DB calls in try/except."
     )
 
+
+@patch("app.api.v1.endpoints.profiles.get_mongo_db")
+def test_admin_analyze_matches_correctly(mock_get_mongo_db: MagicMock, client: TestClient) -> None:
+    """
+    POST /api/v1/admin/analyze with mocked MongoDB returns the scored and ranked candidates.
+    The admin endpoint imports get_mongo_db from profiles at request time, so we patch that.
+    """
+    mock_candidates = [
+        {
+            "candidate_id": "CAN_001",
+            "name": "Alice Developer",
+            "current_title": "Python Developer",
+            "years_of_experience": 5,
+            "last_score": 0.85,
+            "skills": [{"name": "Python"}, {"name": "FastAPI"}],
+            "career_history": [{"title": "Software Engineer", "company": "Acme"}],
+            "reasoning": "Strong match",
+        },
+        {
+            "candidate_id": "CAN_002",
+            "name": "Bob Marketer",
+            "current_title": "Marketing Director",
+            "years_of_experience": 4,
+            "last_score": 0.30,
+            "skills": [{"name": "Sales"}],
+            "career_history": [{"title": "Sales Rep", "company": "Beta"}],
+            "reasoning": "No tech title match",
+        },
+    ]
+
+    mock_cursor = MagicMock()
+
+    async def fake_to_list(length: int):
+        return mock_candidates
+
+    mock_cursor.to_list = fake_to_list
+
+    mock_collection = MagicMock()
+    mock_collection.find.return_value = mock_cursor
+
+    mock_db = MagicMock()
+    mock_db.__getitem__.return_value = mock_collection
+    mock_get_mongo_db.return_value = mock_db
+
+    token = _make_admin_token()
+    response = client.post(
+        "/api/v1/admin/analyze",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "position_title": "Python Developer",
+            "target_domain": "SaaS",
+            "jd_text": "We are seeking a python developer with fastapi expertise.",
+            "top_n": 10,
+        },
+    )
+
+    assert response.status_code == 200, f"Expected 200, got: {response.text}"
+    data = response.json()
+    assert data["scored"] == 2
+    assert len(data["candidates"]) == 2
+    assert data["candidates"][0]["candidate_id"] == "CAN_001"
+    assert data["candidates"][0]["rank"] == 1
+    assert data["candidates"][0]["jd_match_pct"] > 50
+

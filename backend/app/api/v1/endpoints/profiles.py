@@ -319,6 +319,45 @@ async def evaluate_and_sync(
         # Platform/redrob signals mapping
         sig_raw = doc.get("platform_signals") or doc.get("redrob_signals") or {}
         
+        # Determine years of experience and cast to float safely
+        yoe_raw = doc.get("years_of_experience") or doc.get("yearsOfExperience") or doc.get("yoe")
+        if yoe_raw is None and isinstance(doc.get("profile"), dict):
+            yoe_raw = doc["profile"].get("years_of_experience") or doc["profile"].get("yearsOfExperience") or doc["profile"].get("yoe")
+        
+        try:
+            if yoe_raw is None or str(yoe_raw).strip() == "":
+                yoe_val = None
+            else:
+                yoe_val = float(yoe_raw)
+        except (ValueError, TypeError):
+            yoe_val = None
+
+        # Safely parse response rate and interview completion rate as float primitives
+        try:
+            resp_val = sig_raw.get("recruiter_response_rate")
+            if resp_val is None or str(resp_val).strip() == "":
+                github_score = sig_raw.get("github_contributions_score")
+                if github_score is not None:
+                    resp_rate = float(github_score)
+                else:
+                    resp_rate = 85.0
+            else:
+                resp_rate = float(resp_val)
+        except (ValueError, TypeError):
+            resp_rate = 85.0
+
+        try:
+            comp_val = sig_raw.get("interview_completion_rate")
+            if comp_val is None or str(comp_val).strip() == "":
+                if "assessment_pass_rate" in sig_raw:
+                    comp_rate = float(sig_raw.get("assessment_pass_rate", 0.90)) * 100.0
+                else:
+                    comp_rate = 90.0
+            else:
+                comp_rate = float(comp_val)
+        except (ValueError, TypeError):
+            comp_rate = 90.0
+        
         # Build raw dict to normalize
         raw = {
             "candidate_id": cid,
@@ -328,9 +367,10 @@ async def evaluate_and_sync(
             "current_title": current_title,
             "career_history": doc.get("career_history") or [],
             "skills": skills_normalized,
+            "years_of_experience": yoe_val,
             "redrob_signals": {
-                "recruiter_response_rate": sig_raw.get("recruiter_response_rate") or sig_raw.get("github_contributions_score") or 85.0,
-                "interview_completion_rate": sig_raw.get("interview_completion_rate") or sig_raw.get("assessment_pass_rate", 0.90) * 100.0 if "assessment_pass_rate" in sig_raw else 90.0,
+                "recruiter_response_rate": resp_rate,
+                "interview_completion_rate": comp_rate,
                 "last_active_date": sig_raw.get("last_active_date") or "2026-01-01"
             }
         }
@@ -372,6 +412,11 @@ async def evaluate_and_sync(
             "years_of_experience": cand.get("years_of_experience", 0),
             "current_title": cand.get("current_title", "")
         })
+
+    # Maintain strict lexicographical tie-breaking sorting criteria (Score DESC, Candidate_ID ASC)
+    leaderboard_results.sort(key=lambda x: (-x["final_score"], x["candidate_id"]))
+    for i, item in enumerate(leaderboard_results, 1):
+        item["rank"] = i
 
     # Clear and commit top 100 to db.leaderboards_collection
     try:
