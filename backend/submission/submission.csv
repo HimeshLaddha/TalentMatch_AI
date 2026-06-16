@@ -1,0 +1,51 @@
+candidate_id,rank,score,reasoning
+CAND_0000031,1,0.4785,"Strong match: Recommendation Systems Engineer | Search, Ranking & Retrieval with 6.0 YoE. Solid skills (embeddings, retrieval, ranking, transformers) and excellent platform activity metrics."
+CAND_0000001,2,0.4339,"Strong match: Backend Engineer | SQL, Spark, Cloud with 7.0 YoE. Solid skills (python, llm, rag) and excellent platform activity metrics."
+CAND_0000015,3,0.4339,"Strong match: Software Engineer | Cloud & DevOps with 5.0 YoE. Solid skills (pytorch, rag, qdrant) and excellent platform activity metrics."
+CAND_0000032,4,0.4339,"Strong match: .NET Developer | Full-stack development with 8.0 YoE. Solid skills (python, rag, embeddings) and excellent platform activity metrics."
+CAND_0000010,5,0.3893,"Strong match: Data Engineer | Data pipelines & analytics with 5.0 YoE. Solid skills (python, rag) and excellent platform activity metrics."
+CAND_0000044,6,0.3893,"Strong match: Frontend Engineer | Backend systems & APIs with 6.0 YoE. Solid skills (python, rag) and excellent platform activity metrics."
+CAND_0000014,7,0.3446,Strong match: Frontend Engineer | Full-stack development with 8.0 YoE. Solid skills (rag) and excellent platform activity metrics.
+CAND_0000020,8,0.3446,Strong match: Mechanical Engineer | 6.3+ yrs experience with 6.0 YoE. Solid skills (llm) and excellent platform activity metrics.
+CAND_0000025,9,0.3446,Strong match: Frontend Engineer | Cloud & DevOps with 7.0 YoE. Solid skills (rag) and excellent platform activity metrics.
+CAND_0000027,10,0.3293,"Strong match: DevOps Engineer | Cloud & DevOps with 4.0 YoE. Solid skills (rag, retrieval) and excellent platform activity metrics."
+CAND_0000016,11,0.3,Strong match: Accountant | Helping teams scale with 5.0 YoE. Solid skills (none) and excellent platform activity metrics.
+CAND_0000023,12,0.2846,Strong match: Software Engineer | Cloud & DevOps with 4.0 YoE. Solid skills (rag) and excellent platform activity metrics.
+CAND_0000035,13,0.2846,Strong match: Full Stack Developer | Backend systems & APIs with 4.0 YoE. Solid skills (rag) and excellent platform activity metrics.
+CAND_0000039,14,0.24,Strong match: Marketing Manager | Helping teams scale with 4.0 YoE. Solid skills (none) and excellent platform activity metrics.
+CAND_0000009,15,0.21,Strong match: Mechanical Engineer | Driving business outcomes with 11.0 YoE. Solid skills (none) and excellent platform activity metrics.
+CAND_0000036,16,0.21,Strong match: Project Manager | 11.3+ yrs experience with 11.0 YoE. Solid skills (none) and excellent platform activity metrics.
+CAND_0000049,17,0.2096,Strong match: Mechanical Engineer | Helping teams scale with 12.0 YoE. Solid skills (llm) and excellent platform activity metrics.
+CAND_0000037,18,0.1196,Strong match: Business Analyst | 14.3+ yrs experience with 14.0 YoE. Solid skills (llm) and excellent platform activity metrics.
+CAND_0000043,19,0.1168,"Cloud Engineer | Full-stack development with 8.0 YoE. Matched AI skills: llm, rag. Poor recruiter response metrics down-weighted fit."
+CAND_0000018,20,0.1034,Frontend Engineer | Full-stack development with 7.0 YoE. Matched AI skills: rag. Poor recruiter response metrics down-weighted fit.
+CAND_0000038,21,0.1034,Java Developer | Cloud & DevOps with 7.0 YoE. Matched AI skills: rag. Poor recruiter response metrics down-weighted fit.
+CAND_0000046,22,0.1034,Mechanical Engineer | 7.8+ yrs experience with 8.0 YoE. Matched AI skills: llm. Poor recruiter response metrics down-weighted fit.
+CAND_0000002,23,0.1,Profile fails title checks (Operations Manager). High-risk keyword stuffer profile.
+CAND_0000003,24,0.1,Profile fails title checks (Customer Support). High-risk keyword stuffer profile.
+CAND_0000004,25,0.1,Profile fails title checks (Marketing Manager). High-risk keyword stuffer profile.
+CAND_0000005,26,0.1,Profile fails title checks (Accountant). High-risk keyword stuffer profile.
+CAND_0000006,27,0.1,Business Analyst | 6.0+ yrs experience with 6.0 YoE. Matched AI skills: none. Poor recruiter response metrics down-weighted fit.
+CAND_0000007,28,0.1,Civil Engineer | 5.5+ yrs experience with 6.0 YoE. Matched AI skills: none. Poor recruiter response metrics down-weighted fit.
+CAND_0000008,29,0.1,Profile fails title checks (Operations Manager). High-risk keyword stuffer profile.
+CAND_0000011,30,0.1,"QA Engineer | Cloud & DevOps with 2.0 YoE. Matched AI skills: rag, transformers. Poor recruiter response metrics down-weighted fit."
+CAND_0000012,31,0.1,Profile fails title checks (Operations Manager). High-risk keyword stuffer profile.
+CAND_0000013,32,0.1,Civil Engineer | Driving business outcomes with 1.0 YoE. Matched AI skills: none. Poor recruiter response metrics down-weighted fit.
+CAND_0000017,33,0.1,Accountant | 12.3+ yrs experience with 12.0 YoE. Matched AI skills: none. Poor recruiter response metrics down-weighted fit.
+CAND_0000019,34,0.1,Profile fails title checks (Project Manager). High-risk keyword stuffer profile.
+CAND_0000021,35,0.1,Profile fails title checks (Project Manager). High-risk keyword stuffer profile.
+CAND_0000024,36,0.1,Profile fails title checks (HR Manager). High-risk keyword stuffer profile.
+CAND_0000026,37,0.1,Profile fails title checks (Graphic Designer). High-risk keyword stuffer profile.
+CAND_0000028,38,0.1,Profile fails title checks (Operations Manager). High-risk keyword stuffer profile.
+CAND_0000029,39,0.1,Business Analyst | Driving business outcomes with 7.0 YoE. Matched AI skills: none. Poor recruiter response metrics down-weighted fit.
+CAND_0000030,40,0.1,Profile fails title checks (Marketing Manager). High-risk keyword stuffer profile.
+CAND_0000033,41,0.1,Profile fails title checks (Graphic Designer). High-risk keyword stuffer profile.
+CAND_0000034,42,0.1,Inactive candidate (last active: 2026-01-03). Suppressed due to behavioral honeypot indicators.
+CAND_0000040,43,0.1,Profile fails title checks (Customer Support). High-risk keyword stuffer profile.
+CAND_0000041,44,0.1,Operations Manager | Helping teams scale with 14.0 YoE. Matched AI skills: llm. Poor recruiter response metrics down-weighted fit.
+CAND_0000042,45,0.1,Profile fails title checks (HR Manager). High-risk keyword stuffer profile.
+CAND_0000045,46,0.1,Project Manager | 12.2+ yrs experience with 12.0 YoE. Matched AI skills: none. Poor recruiter response metrics down-weighted fit.
+CAND_0000047,47,0.1,Profile fails title checks (Project Manager). High-risk keyword stuffer profile.
+CAND_0000048,48,0.1,Mobile Developer | Full-stack development with 10.0 YoE. Matched AI skills: rag. Poor recruiter response metrics down-weighted fit.
+CAND_0000050,49,0.1,Profile fails title checks (Business Analyst). High-risk keyword stuffer profile.
+CAND_0000022,50,0.0,Mechanical Engineer | Driving business outcomes with 1.0 YoE. Matched AI skills: llm. Poor recruiter response metrics down-weighted fit.

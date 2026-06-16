@@ -13,6 +13,7 @@ Chain execution order:
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import logging
 import os
@@ -71,6 +72,8 @@ def parse_and_score(self, job_id: str, file_bytes: bytes, filename: str) -> dict
             "top_candidates": list[dict],   # ranked top-100
         }
     """
+
+
     logger.info(
         "parse_and_score[%s]: starting — filename=%s, size=%d bytes",
         self.request.id,
@@ -106,6 +109,8 @@ def parse_and_score(self, job_id: str, file_bytes: bytes, filename: str) -> dict
         )
 
     top_candidates, all_candidates = score_all(gz_path=gz_path, candidates=candidates, return_all=True)
+
+
 
     logger.info(
         "parse_and_score[%s]: scored %d candidates (total scored: %d), returning top-%d",
@@ -158,6 +163,8 @@ def generate_xai(self, parse_result: dict[str, Any]) -> dict[str, Any]:
         parse_result with "xai_explanations" key containing the top-3
         enriched candidate dicts (each has an "xai_narrative" field).
     """
+
+
     job_id: str = parse_result.get("job_id", "unknown")
     top_candidates: list[dict] = parse_result.get("top_candidates", [])
 
@@ -199,6 +206,29 @@ def generate_xai(self, parse_result: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Task 3: write_output
 # ---------------------------------------------------------------------------
+def _run_async(coro):
+    """
+    Safely runs an async coroutine from a sync Celery task.
+    Always creates a fresh event loop — never reuses a closed one.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+
+def _get_motor_client():
+    """
+    Creates a fresh Motor client for each task invocation.
+    Never reuse a client across event loops.
+    """
+    from motor.motor_asyncio import AsyncIOMotorClient
+    from app.core.config import settings
+    uri = os.environ.get("MONGO_URI") or os.environ.get("MONGODB_URI") or settings.MONGO_URI or settings.MONGODB_URI
+    return AsyncIOMotorClient(uri)
+
 @app.task(
     bind=True,
     name="tasks.pipeline.write_output",
@@ -209,91 +239,95 @@ def write_output(self, xai_result: dict[str, Any]) -> dict[str, Any]:
     Writes submission/submission.csv from xai_result["top_candidates"].
     Columns: candidate_id, rank, score, reasoning — monotonically
     non-increasing scores (guaranteed by score_all's sort).
-
-    Args:
-        xai_result: dict returned by generate_xai — must contain
-                    "job_id" and "top_candidates".
-
-    Returns:
-        {
-            "job_id":      str,
-            "output_path": str,   # absolute path to the written CSV
-            "status":      "complete",
-        }
     """
-    job_id: str = xai_result.get("job_id", "unknown")
-    top_candidates: list[dict] = xai_result.get("top_candidates", [])
-
-    logger.info(
-        "write_output[%s]: job_id=%s, writing %d candidates to CSV",
-        self.request.id,
-        job_id,
-        len(top_candidates),
-    )
-
-    output_path = None
-    logger.info("write_output[%s]: skipped writing CSV to local disk", self.request.id)
-
-
+    import asyncio
+    job_id = xai_result.get("job_id")
+    top_candidates = xai_result.get("top_candidates", [])
+    all_candidates = xai_result.get("all_candidates", top_candidates)
+    source = xai_result.get("source", "unknown")
     start_time = xai_result.get("start_time")
     runtime_seconds = int(time.time() - start_time) if start_time else 0
-    total_scored = xai_result.get("total_scored") or len(top_candidates)
 
+    # ── Write submission.csv (sync — no event loop needed) ──
     try:
-        _norm_backend = os.path.normcase(_BACKEND_DIR)
-        if not any(os.path.normcase(p) == _norm_backend for p in sys.path):
-            sys.path.insert(0, _BACKEND_DIR)
-        from app.api.v1.endpoints.profiles import get_mongo_db
-        import asyncio
-        from datetime import datetime, timezone
-        from pymongo import UpdateOne
-
-        async def save_rankings():
-            db = get_mongo_db()
-            
-            candidates_data = []
-            for cand in top_candidates:
-                candidates_data.append({
-                    "candidate_id": cand["candidate_id"],
-                    "rank": cand["rank"],
-                    "score": cand["score"],
-                    "reasoning": cand.get("reasoning", "") if cand.get("rank", 999) <= 3 else "",
-                    "years_of_experience": cand.get("years_of_experience", 0),
-                    "current_title": cand.get("current_title", "")
+        output_path = os.path.join("submission", "submission.csv")
+        os.makedirs("submission", exist_ok=True)
+        with open(output_path, "w", newline="") as f:
+            writer = csv.DictWriter(f,
+                fieldnames=["candidate_id","rank","score","reasoning"])
+            writer.writeheader()
+            for c in top_candidates:
+                writer.writerow({
+                    "candidate_id": c["candidate_id"],
+                    "rank":         c["rank"],
+                    "score":        c["score"],
+                    "reasoning":    c.get("reasoning", ""),
                 })
-                
-            doc = {
-                "job_id": job_id,
-                "run_at": datetime.now(timezone.utc).isoformat(),
-                "total_scored": total_scored,
-                "runtime_seconds": runtime_seconds,
-                "candidates": candidates_data
-            }
+        logger.info(f"write_output: wrote {len(top_candidates)} rows to {output_path}")
+    except Exception as e:
+        logger.warning(f"write_output: skipped CSV write — {e}")
+        output_path = None
+
+    # ── Write to MongoDB rankings collection ──
+    async def _save_rankings():
+        client = _get_motor_client()
+        try:
+            db = client[os.getenv("MONGO_DB_NAME", "talentmatch")]
+            from datetime import datetime, timezone
+            run_at = datetime.now(timezone.utc).isoformat()
             
-            await db.rankings.update_one(
+            await db["rankings"].update_one(
                 {"job_id": job_id},
-                {"$set": doc},
+                {"$set": {
+                    "job_id":          job_id,
+                    "run_at":          run_at,
+                    "total_scored":    len(all_candidates),
+                    "source":          source,
+                    "candidates": [
+                        {
+                            "candidate_id": c["candidate_id"],
+                            "rank":         c.get("rank", 9999),
+                            "score":        c.get("score") or c.get("last_score") or 0.0,
+                            "reasoning":    c.get("reasoning", ""),
+                            "current_title": c.get("current_title", ""),
+                            "years_of_experience": c.get("years_of_experience", 0),
+                        }
+                        for c in top_candidates
+                    ],
+                    "runtime_seconds": runtime_seconds,
+                }},
                 upsert=True
             )
-            logger.info("write_output: saved job results to MongoDB rankings collection")
+            logger.info(f"write_output: saved rankings for job {job_id}")
+            return run_at
+        finally:
+            client.close()   # ALWAYS close the client
 
-            # Bulk upsert all candidates to "candidates" collection
-            source = xai_result.get("source", "unknown")
-            all_scored_candidates = xai_result.get("all_candidates", [])
-            
+    # ── Upsert all candidates ──
+    async def _save_candidates(run_at: str):
+        client = _get_motor_client()
+        try:
+            db = client[os.getenv("MONGO_DB_NAME", "talentmatch")]
             from app.database import _upsert_candidates
-            await _upsert_candidates(db, all_scored_candidates, job_id, source)
-            
-        asyncio.run(save_rankings())
-    except Exception as exc:
-        logger.error(
-            "write_output[%s]: failed to write to MongoDB rankings — %s", self.request.id, exc
-        )
+            await _upsert_candidates(
+                all_candidates, job_id=job_id,
+                run_at=run_at, source=source, db=db
+            )
+            logger.info(f"write_output: upserted {len(all_candidates)} candidates")
+        finally:
+            client.close()
+
+    try:
+        run_at = _run_async(_save_rankings())
+        _run_async(_save_candidates(run_at))
+    except Exception as e:
+        logger.error(f"write_output: MongoDB write failed — {e}")
+        # Do not raise — CSV is written, task should still succeed
 
     return {
-        "job_id": job_id,
+        "job_id":      job_id,
         "output_path": output_path,
-        "status": "complete",
+        "status":      "complete",
     }
 
 

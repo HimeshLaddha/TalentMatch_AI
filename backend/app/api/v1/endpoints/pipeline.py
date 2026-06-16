@@ -115,20 +115,24 @@ async def pipeline_status(task_id: str) -> StreamingResponse:
     """
     async def event_stream() -> AsyncGenerator[str, None]:
         db = get_mongo_db()
+        from tasks.celery_app import app as celery_app
         consecutive_errors = 0
         while True:
             try:
-                result = AsyncResult(task_id)
+                result = AsyncResult(task_id, app=celery_app)
 
-                # Detect DisabledBackend explicitly
+                # State A — DisabledBackend (broker not configured)
                 if isinstance(result.backend, DisabledBackend):
-                    # Fall back to MongoDB rankings collection
-                    ranking = await db.rankings.find_one({"job_id": task_id})
+                    ranking = await db["rankings"].find_one(
+                        {"job_id": task_id}, {"_id": 0}
+                    )
                     if ranking:
-                        yield f"data: {json.dumps({'state': 'SUCCESS', 'progress': 100, 'detail': 'Pipeline completed successfully.'})}\n\n"
+                        yield f"data: {json.dumps({'state':'SUCCESS','progress':100,'detail':'Complete'})}\n\n"
                         break
                     else:
-                        yield f"data: {json.dumps({'state': 'PENDING', 'progress': 0, 'detail': 'Waiting for result...'})}\n\n"
+                        yield f"data: {json.dumps({'state':'PENDING','progress':0,'detail':'Waiting...'})}\n\n"
+
+                # State B — Normal Redis backend
                 else:
                     state = result.state
                     meta = result.info or {}
@@ -144,7 +148,7 @@ async def pipeline_status(task_id: str) -> StreamingResponse:
                 consecutive_errors += 1
                 yield f"data: {json.dumps({'state': 'PENDING', 'progress': 0, 'detail': str(e)})}\n\n"
                 if consecutive_errors >= 10:
-                    yield f"data: {json.dumps({'state': 'FAILURE', 'progress': 100, 'detail': 'Status polling failed'})}\n\n"
+                    yield f"data: {json.dumps({'state': 'FAILURE', 'detail': 'Status polling failed after 10 errors'})}\n\n"
                     break
 
             await asyncio.sleep(0.5)

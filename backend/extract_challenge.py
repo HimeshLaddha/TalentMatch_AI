@@ -592,6 +592,14 @@ if __name__ == "__main__":
 
     async def save_to_mongo(candidates):
         db = await get_database()
-        await _upsert_candidates(db, candidates, job_id="cli_run", source="cli")
+        from datetime import datetime, timezone
+        run_at = datetime.now(timezone.utc).isoformat()
+        await _upsert_candidates(
+            candidates,
+            job_id="cli_run",
+            run_at=run_at,
+            source="cli",
+            db=db
+        )
 
     asyncio.run(save_to_mongo(all_scored_candidates))
