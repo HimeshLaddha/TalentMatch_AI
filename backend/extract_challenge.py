@@ -238,6 +238,141 @@ def jd_relevance_score(profile: dict, jd_tokens: set[str]) -> float:
 # ---------------------------------------------------------------------------
 # Guarded Heuristic Scoring Engine
 # ---------------------------------------------------------------------------
+NON_TECH_PATTERNS = re.compile(
+    r'\b(designer|marketing|sales|hr|recruiter|writer|content|accountant|'
+    r'civil|mechanical|chemical|electrical|aerospace|hardware|industrial|'
+    r'nurse|teacher|operations|finance|legal|support|customer|admin|office|'
+    r'creative|artist|brand|quality assurance|qa)\b',
+    re.IGNORECASE
+)
+
+SERVICES_COMPANIES = {
+    "tcs", "infosys", "wipro", "accenture", "cognizant", "capgemini",
+    "tech mahindra", "hcl", "tata", "l&t", "mindtree", "mphasis"
+}
+
+def is_non_tech_title(title: str) -> bool:
+    title = title.lower().strip()
+    if not title:
+        return False
+    if NON_TECH_PATTERNS.search(title):
+        if any(x in title for x in ["software", "data", "ml", "ai", "cloud", "systems"]):
+            return False
+        return True
+    return False
+
+def generate_advanced_reasoning(cand: dict) -> str:
+    profile = cand.get("profile", {}) or {}
+    history = cand.get("career_history", []) or []
+    skills = cand.get("skills", []) or []
+    signals = cand.get("redrob_signals", {}) or {}
+    
+    yoe = float(profile.get("years_of_experience") or 0.0)
+    current_title = profile.get("current_title", "Software Engineer")
+    
+    # Skills
+    skills_names = [s.get("name", "") if isinstance(s, dict) else str(s) for s in skills]
+    matching_skills = []
+    core_kw = ["qdrant", "pinecone", "weaviate", "milvus", "faiss", "elasticsearch", "opensearch", 
+               "embeddings", "sentence-transformers", "llm", "rag", "pytorch", "learning to rank", 
+               "ltr", "ndcg", "map", "retrieval", "ranking", "transformers", "fine-tuning", "lora", "qlora"]
+    for s in skills_names:
+        if any(kw in s.lower() for kw in core_kw):
+            matching_skills.append(s)
+            
+    if not matching_skills:
+        matching_skills = skills_names[:2]
+        
+    skills_str = ", ".join(matching_skills[:3]) if matching_skills else "Python/ML"
+    
+    # Companies
+    companies = []
+    for job in history:
+        if isinstance(job, dict):
+            comp = job.get("company")
+        else:
+            comp = getattr(job, "company", None)
+        if comp and comp not in companies:
+            companies.append(comp)
+    comp_str = f" at {companies[0]}" if companies else ""
+    past_comp_str = f" and {companies[1]}" if len(companies) > 1 else ""
+    
+    # Location
+    location = profile.get("location") or "India"
+    location_str = str(location).lower().strip()
+    country = (profile.get("country", "") or "").lower()
+    
+    # Notice period
+    notice = signals.get("notice_period_days", 30)
+    
+    # Concerns
+    concerns = []
+    
+    # YoE check
+    if yoe < 5.0:
+        concerns.append(f"experience ({yoe} YoE) is below the preferred 5-9 year band")
+    elif yoe > 9.0:
+        concerns.append(f"YoE ({yoe} years) is slightly above the target 5-9 year envelope")
+        
+    # Notice period check
+    if notice > 60:
+        concerns.append(f"notice period is long ({notice} days)")
+        
+    # Services checking
+    services_only = False
+    if history:
+        services_only = True
+        for job in history:
+            if isinstance(job, dict):
+                comp = str(job.get("company", "")).lower().strip()
+                ind = str(job.get("industry", "")).lower().strip()
+            else:
+                comp = str(getattr(job, "company", "")).lower().strip()
+                ind = str(getattr(job, "industry", "")).lower().strip()
+            is_serv = False
+            if any(x in comp for x in SERVICES_COMPANIES):
+                is_serv = True
+            if "services" in ind or "consulting" in ind:
+                is_serv = True
+            if not is_serv:
+                services_only = False
+                break
+            
+    if services_only:
+        concerns.append("career is focused on services/consulting firms rather than product spaces")
+        
+    # Relocation / Country
+    is_in_india = (country == "india" or not country or any(city in location_str for city in ["pune", "noida", "delhi", "gurgaon", "bangalore", "mumbai", "hyderabad", "chennai", "kolkata"]))
+    is_noida_pune = any(city in location_str for city in ["noida", "pune", "delhi", "ncr", "gurgaon"]) or not location_str
+    
+    if not is_in_india:
+        concerns.append("requires international relocation and visa support")
+    elif not is_noida_pune:
+        willing_relocate = signals.get("willing_to_relocate", True)
+        if willing_relocate is False:
+            concerns.append(f"located in {location} and refuses relocation")
+        else:
+            concerns.append(f"located in {location} and will require relocation to Pune/Noida")
+        
+    # Build reasoning string
+    sent1 = f"Experienced {profile.get('current_title', 'Engineer')} with {yoe} YoE{comp_str}{past_comp_str}."
+    sent2 = f"Strong hands-on expertise in {skills_str} aligns well with the search/retrieval requirements."
+    
+    if concerns:
+        if len(concerns) == 1:
+            concern_str = concerns[0]
+        else:
+            concern_str = ", and ".join([", ".join(concerns[:-1]), concerns[-1]])
+        sent3 = f"Note: {concern_str[0].upper() + concern_str[1:]}."
+        return f"{sent1} {sent2} {sent3}"
+    else:
+        notice_days = int(notice) if notice is not None else 30
+        if notice_days == 0:
+            sent3 = f"Located locally in Pune/Noida and available to start immediately."
+        else:
+            sent3 = f"Located locally in Pune/Noida with a short {notice_days}-day notice period."
+        return f"{sent1} {sent2} {sent3}"
+
 def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
     """
     Computes candidate fit score based on target JD parameters and behavioral signals.
@@ -248,7 +383,24 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
     skills = cand.get("skills", []) or []
     signals = cand.get("redrob_signals", {}) or {}
     
-    # 1. Experience Envelope Filter
+    # -------------------------------------------------------------------------
+    # 1. HARD DISQUALIFIERS & HONEYPOTS
+    # -------------------------------------------------------------------------
+    # Rule A: Expert/Advanced skill with 0 duration
+    impossible_skills = []
+    for s in skills:
+        if isinstance(s, dict):
+            name = s.get("name")
+            prof = s.get("proficiency")
+            dur = s.get("duration_months")
+        else:
+            name = str(s)
+            prof = "intermediate"
+            dur = 12
+        if prof in ["expert", "advanced"] and dur == 0:
+            impossible_skills.append(name)
+            
+    # Rule B: YoE vs Career History Duration Mismatch
     try:
         yoe_val = profile.get("years_of_experience")
         if yoe_val is None or str(yoe_val).strip() == "":
@@ -257,50 +409,30 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
             yoe = float(yoe_val)
     except (ValueError, TypeError):
         yoe = 0.0
-
-    if 5.0 <= yoe <= 9.0:
-        exp_score = 1.0
-    elif yoe < 5.0:
-        exp_score = max(0.0, yoe / 5.0)
-    else:
-        # Steep penalty for candidates above 9 years to prevent over-qualification mismatch
-        exp_score = max(0.0, 1.0 - (yoe - 9.0) * 0.15)
         
-    # 2. Role Title Verification (Anti-Keyword Stuffing Trap)
-    has_tech_title = has_engineering_title(cand)
-    title_multiplier = 1.0 if has_tech_title else 0.1
+    total_job_months = 0
+    for job in history:
+        if isinstance(job, dict):
+            if "duration_months" in job:
+                total_job_months += job.get("duration_months", 0)
+            elif "years" in job:
+                total_job_months += int(round(job.get("years", 0) * 12.0))
+        else:
+            if hasattr(job, "duration_months"):
+                total_job_months += getattr(job, "duration_months", 0)
+            elif hasattr(job, "years"):
+                total_job_months += int(round(getattr(job, "years", 0) * 12.0))
+    total_job_years = total_job_months / 12.0
     
-    # 3. Core AI Stack Depth Match
-    core_stack = ["python", "pytorch", "llm", "rag", "embeddings", "retrieval", "ranking", "vector", "qdrant", "transformers"]
-    
-    skills_lowercase = []
-    for s in skills:
-        if isinstance(s, dict):
-            name = s.get("name")
-            if name:
-                skills_lowercase.append(str(name).lower())
-        elif isinstance(s, str):
-            skills_lowercase.append(s.lower())
-            
-    text_pool = ((profile.get("headline", "") or "") + " " + (profile.get("summary", "") or "")).lower()
-    for h in history:
-        if isinstance(h, dict):
-            text_pool += " " + (h.get("description", "") or "").lower()
-        elif hasattr(h, "description"):
-            text_pool += " " + (h.description or "").lower()
+    is_fake = False
+    if len(impossible_skills) > 0:
+        is_fake = True
+    if yoe > 3.0 and total_job_years < 1.0:
+        is_fake = True
+    if total_job_years > 2.0 * yoe and yoe > 0:
+        is_fake = True
         
-    matched_skills = []
-    for token in core_stack:
-        skill_matched = any(token in s_name for s_name in skills_lowercase)
-        if skill_matched or (token in text_pool):
-            matched_skills.append(token)
-            
-    skills_score = len(matched_skills) / len(core_stack)
-    
-    # Apply Skill Recency Score (Guard B) to skills sub-score only
-    skills_score = skills_score * skill_recency_score(cand)
-    
-    # 4. Behavioral Signals Multiplier (Anti-Honeypot Shield)
+    # Rule C: Inactive/Low Engagement Honeypots
     try:
         resp_val = signals.get("recruiter_response_rate")
         if resp_val is None or str(resp_val).strip() == "":
@@ -332,64 +464,209 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
         except (ValueError, IndexError):
             active_year = 2026
             
-    behavior_multiplier = 1.0
-    if response_rate < 0.25:
-        behavior_multiplier *= 0.3
-    if completion_rate < 0.50:
-        behavior_multiplier *= 0.3
-    if active_year < 2025:
-        behavior_multiplier *= 0.1
+    if response_rate < 0.25 or completion_rate < 0.50 or active_year < 2025:
+        is_fake = True
         
-    # Calculate base composite score
-    base_score = (skills_score * 0.70) + (exp_score * 0.30)
-    
-    # Fuzzy Duplicate Identity (Guard C)
     is_dup = is_fuzzy_duplicate(cand)
-    duplicate_multiplier = 0.0 if is_dup else 1.0
-    
-    # Credential Inflation Detector (Guard A)
-    cred_multiplier = credential_inflation_multiplier(cand)
-    
-    # Apply multipliers
-    final_score = base_score * title_multiplier * duplicate_multiplier * cred_multiplier * behavior_multiplier
-    if not is_dup:
-        final_score = max(0.05, final_score)
-    else:
-        final_score = 0.0
-    final_score = round(final_score, 4)
-    
-    # Store intermediate multipliers on cand dictionary
-    cand["_title_multiplier"] = title_multiplier
-    cand["_duplicate_multiplier"] = duplicate_multiplier
-    cand["_cred_multiplier"] = cred_multiplier
-    cand["_behavior_multiplier"] = behavior_multiplier
+    if is_fake or is_dup:
+        # Save intermediate components of ALL scored candidates
+        cand["_title_multiplier"] = 0.01
+        cand["_duplicate_multiplier"] = 0.0 if is_dup else 1.0
+        cand["_cred_multiplier"] = 1.0
+        cand["_behavior_multiplier"] = 0.1
+        sub_scores = {
+            "role_fit": 0.0,
+            "trajectory": 0.0,
+            "platform_signals": response_rate * 0.5 + completion_rate * 0.5,
+            "domain_alignment": 0.0
+        }
+        xai_details = {
+            "name": profile.get("anonymized_name") or "Candidate X",
+            "strongest_alignment": "None",
+            "competency_gaps": "All",
+            "prompts": []
+        }
+        reasoning = "Disqualified: Honeypot or duplicate profile indicator." if is_fake else "Disqualified: Duplicate identity detected."
+        return 0.0, sub_scores, reasoning, xai_details
 
+    # -------------------------------------------------------------------------
+    # 2. TITLE CLASSIFICATION
+    # -------------------------------------------------------------------------
+    current_title = (profile.get("current_title", "") or "").strip().lower()
+    has_tech_title = has_engineering_title(cand) and not is_non_tech_title(current_title)
     
-    # Sub-scores structure
-    sub_scores = {
-        "role_fit": round(skills_score, 4),
-        "trajectory": round(exp_score, 4),
-        "platform_signals": round(response_rate * 0.5 + completion_rate * 0.5, 4),
-        "domain_alignment": round(1.0 if any(d in text_pool for d in ["fintech", "saas"]) else 0.5, 4)
+    # If career history exists, make sure there is at least one tech job
+    if history:
+        tech_history_count = 0
+        for job in history:
+            if isinstance(job, dict):
+                t = job.get("title", "")
+            else:
+                t = getattr(job, "title", "")
+            if not is_non_tech_title(t):
+                tech_history_count += 1
+        if tech_history_count == 0:
+            has_tech_title = False
+
+    title_multiplier = 1.0 if has_tech_title else 0.01
+
+    # -------------------------------------------------------------------------
+    # 3. TECHNICAL FIT SCORING (ROLE FIT)
+    # -------------------------------------------------------------------------
+    skills_lowercase = []
+    for s in skills:
+        if isinstance(s, dict):
+            name = s.get("name")
+            if name:
+                skills_lowercase.append(str(name).lower())
+        elif isinstance(s, str):
+            skills_lowercase.append(s.lower())
+            
+    text_pool = ((profile.get("headline", "") or "") + " " + (profile.get("summary", "") or "")).lower()
+    for h in history:
+        if isinstance(h, dict):
+            text_pool += " " + (h.get("description", "") or "").lower()
+        elif hasattr(h, "description"):
+            text_pool += " " + (h.description or "").lower()
+            
+    groups = {
+        "embeddings": ["embeddings", "sentence-transformers", "bge", "e5"],
+        "vector_dbs": ["vector", "qdrant", "pinecone", "weaviate", "milvus", "faiss", "elasticsearch", "opensearch"],
+        "python_pytorch": ["python", "pytorch", "scikit-learn", "pandas", "numpy"],
+        "eval": ["ndcg", "mrr", "map", "eval", "ranking", "learning-to-rank", "ltr"],
+        "llm_rag": ["llm", "rag", "transformers", "hugging face", "gpt", "fine-tuning", "lora", "qlora", "peft", "langchain"]
     }
     
-    # Construct descriptive reasoning
-    headline = profile.get("headline") or "Software Engineer"
-    skills_str = ", ".join(matched_skills[:4]) if matched_skills else "none"
-    
-    if not has_tech_title:
-        reasoning = f"Profile fails title checks ({profile.get('current_title', 'None')}). High-risk keyword stuffer profile."
-    elif behavior_multiplier < 0.1:
-        reasoning = f"Inactive candidate (last active: {last_active or 'unknown'}). Suppressed due to behavioral honeypot indicators."
-    elif behavior_multiplier < 1.0:
-        reasoning = f"{headline} with {yoe} YoE. Matched AI skills: {skills_str}. Poor recruiter response metrics down-weighted fit."
-    else:
-        reasoning = f"Strong match: {headline} with {yoe} YoE. Solid skills ({skills_str}) and excellent platform activity metrics."
+    group_matches = {}
+    for gname, keywords in groups.items():
+        matched = False
+        for kw in keywords:
+            if any(kw in s for s in skills_lowercase):
+                matched = True
+                break
+            if re.search(rf"\b{re.escape(kw)}\b", text_pool):
+                matched = True
+                break
+        group_matches[gname] = matched
         
+    skills_score = sum(1 for m in group_matches.values() if m) / len(groups)
+    
+    # Scale by skill recency score
+    skills_score = skills_score * skill_recency_score(cand)
+
+    # -------------------------------------------------------------------------
+    # 4. EXPERIENCE ENVELOPE (TRAJECTORY)
+    # -------------------------------------------------------------------------
+    if 5.0 <= yoe <= 9.0:
+        exp_score = 1.0
+    elif yoe < 5.0:
+        exp_score = max(0.1, yoe / 5.0)
+    else:
+        exp_score = max(0.4, 1.0 - (yoe - 9.0) * 0.15)
+        
+    cred_multiplier = credential_inflation_multiplier(cand)
+    
+    # Job Hopper Penalty
+    job_hopping_multiplier = 1.0
+    if len(history) >= 3:
+        avg_tenure = total_job_months / len(history)
+        if avg_tenure < 18.0:
+            job_hopping_multiplier = 0.8
+            
+    # -------------------------------------------------------------------------
+    # 5. LOGISTICS AND CONTEXT MULTIPLIERS
+    # -------------------------------------------------------------------------
+    # Notice Period Multiplier
+    notice_days = signals.get("notice_period_days")
+    notice_multiplier = 1.0
+    if notice_days is not None:
+        try:
+            notice_val = float(notice_days)
+            if notice_val > 90:
+                notice_multiplier = 0.6
+            elif notice_val > 60:
+                notice_multiplier = 0.8
+            elif notice_val > 30:
+                notice_multiplier = 0.95
+        except (ValueError, TypeError):
+            pass
+            
+    # Location Multiplier
+    location_str = str(profile.get("location", "") or "").lower()
+    country_str = str(profile.get("country", "") or "").lower()
+    willing_relocate = signals.get("willing_to_relocate", True)
+    if willing_relocate is None:
+        willing_relocate = True
+        
+    location_multiplier = 1.0
+    
+    # Check if in India or default (empty location/country = local/India)
+    is_in_india = (country_str == "india" or not country_str or any(city in location_str for city in ["pune", "noida", "delhi", "gurgaon", "bangalore", "mumbai", "hyderabad", "chennai", "kolkata"]))
+    
+    if not is_in_india and country_str:
+        location_multiplier = 0.4
+    else:
+        is_noida_pune = any(city in location_str for city in ["noida", "pune", "delhi", "ncr", "gurgaon"]) or not location_str
+        if not is_noida_pune and not willing_relocate:
+            location_multiplier = 0.8
+
+    # Services-only background check
+    services_only = False
+    if history:
+        services_only = True
+        for job in history:
+            if isinstance(job, dict):
+                comp = str(job.get("company", "")).lower().strip()
+                ind = str(job.get("industry", "")).lower().strip()
+            else:
+                comp = str(getattr(job, "company", "")).lower().strip()
+                ind = str(getattr(job, "industry", "")).lower().strip()
+            is_serv = False
+            if any(x in comp for x in SERVICES_COMPANIES):
+                is_serv = True
+            if "services" in ind or "consulting" in ind:
+                is_serv = True
+            if not is_serv:
+                services_only = False
+                break
+                
+    services_multiplier = 0.4 if services_only else 1.0
+
+    # -------------------------------------------------------------------------
+    # COMPUTE FINAL SCORE
+    # -------------------------------------------------------------------------
+    role_fit = skills_score
+    trajectory = exp_score * job_hopping_multiplier
+    platform_signals = response_rate * 0.5 + completion_rate * 0.5
+    domain_alignment = 1.0 if any(d in text_pool for d in ["fintech", "saas", "marketplace", "hr"]) else 0.6
+
+    base_score = (role_fit * 0.40) + (trajectory * 0.30) + (platform_signals * 0.20) + (domain_alignment * 0.10)
+    final_score = base_score * title_multiplier * cred_multiplier * notice_multiplier * location_multiplier * services_multiplier
+    final_score = round(max(0.05, final_score), 4)
+
+    # Store intermediate multipliers on cand dictionary
+    cand["_title_multiplier"] = title_multiplier
+    cand["_duplicate_multiplier"] = 1.0
+    cand["_cred_multiplier"] = cred_multiplier
+    cand["_behavior_multiplier"] = 1.0
+
+    # Sub-scores structure
+    sub_scores = {
+        "role_fit": round(role_fit, 4),
+        "trajectory": round(trajectory, 4),
+        "platform_signals": round(platform_signals, 4),
+        "domain_alignment": round(domain_alignment, 4)
+    }
+
+    # Generate reasoning
+    reasoning = generate_advanced_reasoning(cand)
+
     # Compile candidate details for Explainable AI (XAI)
+    matched_skills = [k for k, v in group_matches.items() if v]
+    core_stack = ["embeddings", "vector_dbs", "python_pytorch", "eval", "llm_rag"]
     xai_details = {
         "name": profile.get("anonymized_name") or "Candidate X",
-        "strongest_alignment": f"Matches {len(matched_skills)} core AI skills ({', '.join(matched_skills[:5])}) with a technical career track of {yoe} years of experience.",
+        "strongest_alignment": f"Matches {len(matched_skills)} core AI stacks ({', '.join(matched_skills[:3])}) with a technical career track of {yoe} years of experience.",
         "competency_gaps": f"Lacks explicit skills in {', '.join([s for s in core_stack if s not in matched_skills][:3])}." if len(matched_skills) < len(core_stack) else "No major technical competency gaps identified.",
         "prompts": [
             f"Can you walk us through the system architecture of your most advanced retrieval or ranking system?",
@@ -397,8 +674,9 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
             f"What evaluation frameworks (NDCG, MAP, etc.) did you design to validate ranking quality?"
         ]
     }
-    
+
     return final_score, sub_scores, reasoning, xai_details
+
 
 # ---------------------------------------------------------------------------
 # Public export: load + score all candidates from a gz_path
@@ -601,7 +879,7 @@ async def run_pipeline():
                 cand["candidate_id"],
                 cand["rank"],
                 cand["score"],
-                cand.get("reasoning", "") if cand.get("rank", 999) <= 3 else ""
+                cand.get("reasoning", "")
             ])
     logger.info(f"Successfully wrote submission.csv to {SUBMISSION_CSV}")
 
