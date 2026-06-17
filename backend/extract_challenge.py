@@ -12,6 +12,9 @@ import hashlib
 from datetime import datetime
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
+BASE_DIR = r"c:\Users\Admin\OneDrive\Desktop\TalentMatch_AI\India_runs_data_and_ai_challenge"
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 from validate_submission import validate_submission as check_sub
 
 # Configure logging
@@ -24,7 +27,6 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 # ---------------------------------------------------------------------------
 # Path configuration
 # ---------------------------------------------------------------------------
-BASE_DIR = r"c:\Users\Admin\OneDrive\Desktop\TalentMatch_AI\India_runs_data_and_ai_challenge"
 CANDIDATES_GZ = os.path.join(BASE_DIR, "candidates.jsonl.gz")
 CANDIDATES_JSONL = os.path.join(BASE_DIR, "candidates.jsonl")
 SAMPLE_CANDIDATES = os.path.join(BASE_DIR, "sample_candidates.json")

@@ -3,7 +3,7 @@
 ![CI](https://github.com/HimeshLaddha/TalentMatch_AI/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/python-3.11-blue)
 ![Next.js](https://img.shields.io/badge/next.js-14-black)
-![Tests](https://img.shields.io/badge/tests-31%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-32%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 > Production-grade talent intelligence platform that ranks 100,000+
@@ -96,7 +96,7 @@ PYTHONPATH=backend python backend/extract_challenge.py
 ### Run tests
 ```bash
 cd backend && pytest tests/ -v
-# 31 tests, ~12 seconds
+# 32 tests, ~12 seconds
 ```
 
 ---

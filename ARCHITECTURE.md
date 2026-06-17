@@ -107,9 +107,15 @@ The core evaluation logic utilizes a 6-guard heuristic matrix to score candidate
 To support dynamic re-ranking without manual slider values, the recruiter dashboard supports a Job Description (JD) keyword booster:
 
 - **Step 1**: `tokenise_jd(jd_text)` tokenizes the job description, removes common English stopwords via regex, and returns a unique set of core keywords.
-- **Step 2**: `jd_relevance_score(profile, jd_tokens)` calculates semantic overlap:
-  $$\text{overlap} = \frac{|\text{candidate\_tokens} \cap \text{jd\_tokens}|}{|\text{jd\_tokens}|}$$
-  $$\text{multiplier} = 0.5 + (\text{overlap} \times 0.5) \quad \text{in range } [0.5, 1.0]$$
+- **Step 2**: `jd_relevance_score(profile, jd_tokens)` calculates semantic overlap using a blended F1-style harmonic mean approach to avoid penalizing long JDs or inflating short JDs:
+  - **Precision**: How much of the JD is matched by the candidate.
+    $$Precision = \frac{|\text{candidate\_tokens} \cap \text{jd\_tokens}|}{\max(|\text{jd\_tokens}|, 1)}$$
+  - **Recall**: How much of the candidate's profile is relevant to the JD.
+    $$Recall = \frac{|\text{candidate\_tokens} \cap \text{jd\_tokens}|}{\max(|\text{candidate\_tokens}|, 1)}$$
+  - **F1 Harmonic Mean**: Balances precision and recall.
+    $$F1 = \frac{2 \times Precision \times Recall}{Precision + Recall} \quad (\text{or } 0.0 \text{ if } Precision + Recall = 0)$$
+  - **Relevance Multiplier**: Maps the $F1$ score in $[0, 1]$ to a score adjustment in $[0.5, 1.0]$.
+    $$\text{multiplier} = 0.5 + (F1 \times 0.5)$$
 - **Step 3**: `final_score = last_score * jd_multiplier`.
 - **Step 4**: The system re-sorts all matched candidates descending by `final_score`.
 
@@ -190,7 +196,7 @@ The format router handles compressed archives, structured tables, and raw docume
 | **POST** | `/api/v1/pipeline/upload` | JWT | Upload candidate pool file, dispatch Celery chain |
 | **GET** | `/api/v1/pipeline/status/{task_id}` | None | Server-Sent Events progress stream (0-100) |
 | **GET** | `/api/v1/results/{job_id}` | JWT | Fetch ranked candidates for a specific run |
-| **GET** | `/api/v1/results/latest` | JWT | Fetch ranked candidates for the most recent run |
+| **GET** | `/api/v1/results/latest` | JWT | Fetch top N candidates globally across all candidates by last_score |
 | **POST** | `/api/v1/pipeline/rerank` | JWT | Re-ranks candidates using Job Description keywords |
 | **GET** | `/api/v1/candidates` | JWT | Fetch paginated candidates with query filters |
 | **GET** | `/api/v1/candidates/{id}` | JWT | Fetch full profile detail including run history |
@@ -202,12 +208,11 @@ The format router handles compressed archives, structured tables, and raw docume
 | Test File | Tests | Covers |
 |---|---|---|
 | `test_scoring_invariants.py` | 9 | Score monotonicity, zero honeypot rate, keyword stuffing, experience envelope, duplicates, CTO regex, seniority floors, skill recency decay, fuzzy identity hashing |
-| `test_api_endpoints.py` | 4 | Immediate queuing, auth validation, status SSE stream, candidate list route checks |
+| `test_api_endpoints.py` | 5 | Immediate queuing, auth validation, status SSE stream, candidate list route checks, admin JD analysis matches |
 | `test_parsers.py` | 7 | Format routing paths, JSON array batch loading, single JSON file mapping, unique UPLOAD ID generation, PDF/DOCX mock text extractions |
-| `test_profiles_auth_cache.py` | 5 | JWT role validation, secure endpoints, client caching hashes |
+| `test_profiles_auth_cache.py` | 9 | JWT role validation, secure endpoints, client caching hashes, login credentials |
 | `test_services.py` | 2 | MongoDB Motor driver database queries and candidate profile status helper |
-| `test_candidates_endpoint.py` | 4 | Filter query validation, pagination boundaries, and mock connection error fallbacks |
-| **Total** | **31** | **Full code integration and schema compliance** |
+| **Total** | **32** | **Full code integration and schema compliance** |
 
 ---
 
