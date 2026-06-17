@@ -12,11 +12,37 @@ import hashlib
 from datetime import datetime
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
-BASE_DIR = r"c:\Users\Admin\OneDrive\Desktop\TalentMatch_AI\India_runs_data_and_ai_challenge"
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
-# pyrefly: ignore [missing-import]
-from validate_submission import validate_submission as check_sub
+
+# backend/extract_challenge.py
+import sys
+import os
+
+# 🟢 DYNAMIC RESOLUTION: Calculate project root location relative to this file
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(CURRENT_DIR)  # Steps out of backend/ to project root
+
+# Map relative paths for both the standalone directory or parent module wrappers
+CHALLENGE_DIR = os.path.join(PROJECT_ROOT, "India_runs_data_and_ai_challenge")
+
+# Append fallback targets systematically
+if CHALLENGE_DIR not in sys.path:
+    sys.path.insert(0, CHALLENGE_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+try:
+    # Safely imports validation components regardless of the host OS environment
+    # pyrefly: ignore [missing-import]
+    from validate_submission import validate_submission as check_sub
+except ModuleNotFoundError:
+    # Emergency fallback if your local workspace has structural directory discrepancies
+    try:
+        from India_runs_data_and_ai_challenge.validate_submission import validate_submission as check_sub
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError(
+            "CRITICAL: System failed to locate 'validate_submission.py' via dynamic routing planes. "
+            f"Inspected paths: {[CHALLENGE_DIR, PROJECT_ROOT]}"
+        )
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -28,12 +54,12 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 # ---------------------------------------------------------------------------
 # Path configuration
 # ---------------------------------------------------------------------------
-CANDIDATES_GZ = os.path.join(BASE_DIR, "candidates.jsonl.gz")
-CANDIDATES_JSONL = os.path.join(BASE_DIR, "candidates.jsonl")
-SAMPLE_CANDIDATES = os.path.join(BASE_DIR, "sample_candidates.json")
+CANDIDATES_GZ = os.path.join(CHALLENGE_DIR, "candidates.jsonl.gz")
+CANDIDATES_JSONL = os.path.join(CHALLENGE_DIR, "candidates.jsonl")
+SAMPLE_CANDIDATES = os.path.join(CHALLENGE_DIR, "sample_candidates.json")
 
-SUBMISSION_CSV = os.path.join(BASE_DIR, "submission.csv")
-LEADERBOARD_MD = os.path.join(BASE_DIR, "India_runs_final_leaderboard.md")
+SUBMISSION_CSV = os.path.join(CHALLENGE_DIR, "submission.csv")
+LEADERBOARD_MD = os.path.join(CHALLENGE_DIR, "India_runs_final_leaderboard.md")
 
 # ---------------------------------------------------------------------------
 # MongoDB Atlas Cleanse
@@ -885,8 +911,8 @@ async def run_pipeline():
 
     # Validate submission.csv
     try:
-        if BASE_DIR not in sys.path:
-            sys.path.insert(0, BASE_DIR)
+        if CHALLENGE_DIR not in sys.path:
+            sys.path.insert(0, CHALLENGE_DIR)
         
         errors = check_sub(SUBMISSION_CSV)
         if errors:
