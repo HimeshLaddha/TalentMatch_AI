@@ -15,6 +15,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 BASE_DIR = r"c:\Users\Admin\OneDrive\Desktop\TalentMatch_AI\India_runs_data_and_ai_challenge"
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
+# pyrefly: ignore [missing-import]
 from validate_submission import validate_submission as check_sub
 
 # Configure logging
