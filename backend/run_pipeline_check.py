@@ -570,7 +570,7 @@ def _build_sample_candidate(
             "anonymized_name": candidate_id,
         },
         "career_history": [
-            {"title": t, "description": f"Worked as {t}."} for t in history_titles
+             {"title": t, "description": f"Worked as {t}."} for t in history_titles
         ],
         "skills": [{"name": s} for s in skills],
         "redrob_signals": {

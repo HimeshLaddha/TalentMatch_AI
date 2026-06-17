@@ -56,7 +56,13 @@ def _make_candidate(
             "anonymized_name": name or candidate_id,
         },
         "career_history": [
-            {"title": t, "description": f"Worked as {t} for a tech company."}
+            {
+                "title": t,
+                "company": "Tech Corp",
+                "duration_months": 36,
+                "years": 3.0,
+                "description": f"Worked as {t} for a tech company."
+            }
             for t in history_titles
         ],
         "redrob_signals": {
