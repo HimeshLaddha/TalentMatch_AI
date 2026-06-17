@@ -23,16 +23,48 @@ def tokenise_jd(text: str) -> set[str]:
     return tokens - STOPWORDS
 
 def jd_relevance_score(candidate: dict, jd_tokens: set) -> float:
+    """
+    Returns multiplier in [0.5, 1.0].
+    Uses blended denominator to avoid penalising long JDs.
+
+    Key change: denominator is now the SMALLER of:
+      - jd_tokens count (old behaviour)
+      - candidate_tokens count
+    Then softened further by taking the geometric mean of
+    the two overlap ratios (precision and recall).
+    """
     if not jd_tokens:
         return 1.0
+
     parts = [
         candidate.get("current_title", ""),
-        " ".join(s.get("name","") for s in candidate.get("skills",[])),
-        " ".join(r.get("title","") for r in candidate.get("career_history",[])),
+        " ".join(s.get("name", "") for s in candidate.get("skills", [])),
+        " ".join(r.get("title", "") for r in candidate.get("career_history", [])),
     ]
-    c_tokens = set(re.findall(r'\b\w{3,}\b', " ".join(parts).lower()))
-    overlap = len(c_tokens & jd_tokens) / max(len(jd_tokens), 1)
-    return round(0.5 + overlap * 0.5, 4)
+    candidate_text = " ".join(parts).lower()
+    c_tokens = set(re.findall(r'\b\w{3,}\b', candidate_text))
+
+    if not c_tokens:
+        return 0.5
+
+    intersection = len(c_tokens & jd_tokens)
+
+    # Precision: how much of the candidate matches the JD
+    precision = intersection / max(len(jd_tokens), 1)
+
+    # Recall: how much of the candidate's profile is JD-relevant
+    recall = intersection / max(len(c_tokens), 1)
+
+    # F1-style harmonic mean — balances precision and recall
+    # Avoids both "long JD penalty" and "short JD inflation"
+    if precision + recall == 0:
+        f1 = 0.0
+    else:
+        f1 = 2 * (precision * recall) / (precision + recall)
+
+    # Map f1 [0, 1] to multiplier [0.5, 1.0]
+    multiplier = round(0.5 + (f1 * 0.5), 4)
+    return multiplier
 
 class AnalyzeRequest(BaseModel):
     position_title: str = ""

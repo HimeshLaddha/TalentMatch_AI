@@ -12,6 +12,7 @@ import hashlib
 from datetime import datetime
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
+from validate_submission import validate_submission as check_sub
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -206,22 +207,30 @@ def tokenise_jd(jd_text: str) -> set[str]:
     return tokens - STOPWORDS
 
 def jd_relevance_score(profile: dict, jd_tokens: set[str]) -> float:
-    """
-    Returns multiplier in [0.5, 1.0].
-    Returns 1.0 if jd_tokens is empty (no JD = no adjustment).
-    """
     if not jd_tokens:
         return 1.0
 
     candidate_text = " ".join([
-        profile.get("current_title", "") or "",
-        " ".join(s.get("name", "") or "" for s in profile.get("skills", []) if s),
-        " ".join(r.get("title", "") or "" for r in profile.get("career_history", []) if r),
+        profile.get("current_title", ""),
+        " ".join(s.get("name", "") for s in profile.get("skills", [])),
+        " ".join(r.get("title","") for r in profile.get("career_history",[])),
     ]).lower()
 
-    candidate_tokens = set(re.findall(r'\b\w+\b', candidate_text))
-    overlap = len(candidate_tokens & jd_tokens) / max(len(jd_tokens), 1)
-    return round(0.5 + (overlap * 0.5), 4)
+    c_tokens = set(re.findall(r'\b\w{3,}\b', candidate_text))
+
+    if not c_tokens:
+        return 0.5
+
+    intersection = len(c_tokens & jd_tokens)
+    precision = intersection / max(len(jd_tokens), 1)
+    recall    = intersection / max(len(c_tokens), 1)
+
+    if precision + recall == 0:
+        f1 = 0.0
+    else:
+        f1 = 2 * (precision * recall) / (precision + recall)
+
+    return round(0.5 + (f1 * 0.5), 4)
 
 # ---------------------------------------------------------------------------
 # Guarded Heuristic Scoring Engine
@@ -597,7 +606,7 @@ async def run_pipeline():
     try:
         if BASE_DIR not in sys.path:
             sys.path.insert(0, BASE_DIR)
-        from validate_submission import validate_submission as check_sub
+        
         errors = check_sub(SUBMISSION_CSV)
         if errors:
             logger.error(f"Submission CSV validation failed: {errors}")
