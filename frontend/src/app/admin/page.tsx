@@ -364,7 +364,7 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-6">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6">
       {/* Header Banner */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-tm-border pb-5">
         <div>
@@ -674,7 +674,7 @@ export default function AdminDashboard() {
                                     />
                                   </div>
                                   <span className="text-[11px] font-mono font-medium shrink-0">
-                                    {c.jd_score.toFixed(3)}
+                                    {c.jd_score != null ? Number(c.jd_score).toFixed(3) : "—"}
                                   </span>
                                 </div>
                               </td>
@@ -840,7 +840,7 @@ export default function AdminDashboard() {
                 <div className="flex items-center gap-3">
                   <div className="text-right">
                     <div className="text-[10px] text-tm-muted font-medium uppercase tracking-wider">JD Match Score</div>
-                    <div className="text-lg font-bold text-tm-text leading-tight">{selected.jd_score.toFixed(3)}</div>
+                    <div className="text-lg font-bold text-tm-text leading-tight">{selected.jd_score != null ? Number(selected.jd_score).toFixed(3) : "—"}</div>
                   </div>
                   <span className={`inline-block text-[11px] px-3 py-1 rounded-full border font-medium ${
                     selected.jd_match_pct >= 61

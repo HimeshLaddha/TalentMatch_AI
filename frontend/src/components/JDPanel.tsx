@@ -112,14 +112,14 @@ export default function JDPanel({ jobId, onRerank }: JDPanelProps) {
         placeholder="Paste the job description here to boost candidates whose skills and titles match the role..."
         rows={5}
         style={{ borderWidth: "0.5px" }}
-        className="w-full text-[13px] leading-[1.6] border-tm-border rounded-[8px] px-3 py-2.5 resize-y focus:outline-none focus:border-tm-text"
+        className="w-full text-[13px] leading-[1.6] border-tm-border rounded-[8px] px-3 py-2.5 resize-y focus:outline-none focus:border-tm-text min-h-[100px] md:min-h-[120px]"
         disabled={loading || !jobId}
       />
 
       {errorMsg && <p className="text-[11px] text-red-500 font-medium">{errorMsg}</p>}
 
       {/* Button Row */}
-      <div className="flex justify-between items-center h-8">
+      <div className="flex flex-col-reverse md:flex-row justify-between items-stretch md:items-center gap-2 mt-1">
         <div>
           {jdActive && (
             <button
@@ -131,11 +131,11 @@ export default function JDPanel({ jobId, onRerank }: JDPanelProps) {
             </button>
           )}
         </div>
-        
+
         <button
           onClick={handleApply}
           disabled={loading || !jobId || !jdText.trim()}
-          className="bg-tm-text text-white font-medium hover:bg-tm-text/90 transition-colors text-[12px] py-1.5 px-3.5 rounded-[8px] flex items-center gap-1.5 disabled:opacity-50"
+          className="bg-tm-text text-white font-medium hover:bg-tm-text/90 transition-colors text-[12px] py-1.5 px-3.5 rounded-[8px] flex items-center justify-center gap-1.5 disabled:opacity-50 w-full md:w-auto"
         >
           {loading ? (
             <>

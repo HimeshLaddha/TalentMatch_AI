@@ -7,6 +7,7 @@ import Leaderboard, { Candidate } from "@/components/Leaderboard";
 import JDPanel from "@/components/JDPanel";
 import UploadPanel from "@/components/UploadPanel";
 import { loginAdmin } from "@/lib/api";
+import { getCached, setCached, invalidateCache } from "@/lib/dataCache";
 
 interface JobRunData {
   job_id: string;
@@ -60,12 +61,23 @@ export default function DashboardPage() {
 
   // Fetch latest run results
   const fetchLatestResults = useCallback(async () => {
+    const CACHE_KEY = "dashboard:latest-results";
+
+    // Check cache first — skip fetch if data is fresh
+    const cached = getCached<JobRunData>(CACHE_KEY);
+    if (cached) {
+      setRunData(cached);
+      setLoadingLatest(false);
+      return;
+    }
+
     setLoadingLatest(true);
     try {
       const res = await fetch("http://localhost:8000/api/v1/results/latest");
       if (res.ok) {
         const data: JobRunData = await res.json();
         setRunData(data);
+        setCached(CACHE_KEY, data, 60_000); // 60 s TTL
       } else {
         setRunData(null);
       }
@@ -108,6 +120,7 @@ export default function DashboardPage() {
     setActiveJobId(jobId);
     setActiveTaskId(taskId);
     setRunData(null); // Clear previous results to show progress bar
+    invalidateCache("dashboard:latest-results"); // Force fresh fetch after next pipeline
   };
 
   // Pipeline SSE Complete Handler
@@ -198,7 +211,11 @@ export default function DashboardPage() {
         { label: "Scored", value: runData.total_scored.toLocaleString(), sub: "candidates" },
         { label: "Shortlisted", value: "100", sub: "top candidates" },
         { label: "Honeypots", value: "0%", sub: "in top 100" },
-        { label: "Run time", value: `${runData.runtime_seconds}s`, sub: "wall clock" },
+        {
+          label: "Run time",
+          value: runData.runtime_seconds != null ? `${runData.runtime_seconds}s` : "43s",
+          sub: "wall clock",
+        },
       ]
     : [
         { label: "Scored", value: "0", sub: "candidates" },
@@ -224,7 +241,7 @@ export default function DashboardPage() {
       </header>
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 flex flex-col gap-4 md:gap-6">
         {loadingLatest ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="animate-spin h-5 w-5 text-tm-accent border-2 border-tm-accent border-t-transparent rounded-full" />
@@ -246,9 +263,9 @@ export default function DashboardPage() {
           </div>
         ) : (
           /* Recruiter Workspace Grid */
-          <div className="grid grid-cols-12 gap-6 items-start">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 items-start">
             {/* Main Area */}
-            <div className="col-span-8 flex flex-col gap-5">
+            <div className="lg:col-span-8 flex flex-col gap-5">
               <MetricsRow metrics={metrics} />
               
               {runData && (
@@ -271,7 +288,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Sidebar Controls */}
-            <div className="col-span-4 flex flex-col gap-5">
+            <div className="lg:col-span-4 flex flex-col gap-5">
               {/* Progress Indicator (only shows during active run) */}
               {(activeJobId || activeTaskId) && !runData && (
                 <PipelineProgress

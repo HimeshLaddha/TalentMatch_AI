@@ -12,7 +12,7 @@ interface MetricsRowProps {
 
 export default function MetricsRow({ metrics }: MetricsRowProps) {
   return (
-    <div className="grid grid-cols-4 gap-[10px] w-full">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-[10px] w-full">
       {metrics.map((m, idx) => (
         <div
           key={idx}
