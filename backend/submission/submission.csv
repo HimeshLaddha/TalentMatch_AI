@@ -1,51 +1,51 @@
 candidate_id,rank,score,reasoning
-CAND_0000031,1,0.4785,"Strong match: Recommendation Systems Engineer | Search, Ranking & Retrieval with 6.0 YoE. Solid skills (embeddings, retrieval, ranking, transformers) and excellent platform activity metrics."
-CAND_0000001,2,0.4339,"Strong match: Backend Engineer | SQL, Spark, Cloud with 7.0 YoE. Solid skills (python, llm, rag) and excellent platform activity metrics."
-CAND_0000015,3,0.4339,"Strong match: Software Engineer | Cloud & DevOps with 5.0 YoE. Solid skills (pytorch, rag, qdrant) and excellent platform activity metrics."
-CAND_0000032,4,0.4339,"Strong match: .NET Developer | Full-stack development with 8.0 YoE. Solid skills (python, rag, embeddings) and excellent platform activity metrics."
-CAND_0000010,5,0.3893,"Strong match: Data Engineer | Data pipelines & analytics with 5.0 YoE. Solid skills (python, rag) and excellent platform activity metrics."
-CAND_0000044,6,0.3893,"Strong match: Frontend Engineer | Backend systems & APIs with 6.0 YoE. Solid skills (python, rag) and excellent platform activity metrics."
-CAND_0000014,7,0.3446,Strong match: Frontend Engineer | Full-stack development with 8.0 YoE. Solid skills (rag) and excellent platform activity metrics.
-CAND_0000020,8,0.3446,Strong match: Mechanical Engineer | 6.3+ yrs experience with 6.0 YoE. Solid skills (llm) and excellent platform activity metrics.
-CAND_0000025,9,0.3446,Strong match: Frontend Engineer | Cloud & DevOps with 7.0 YoE. Solid skills (rag) and excellent platform activity metrics.
-CAND_0000027,10,0.3293,"Strong match: DevOps Engineer | Cloud & DevOps with 4.0 YoE. Solid skills (rag, retrieval) and excellent platform activity metrics."
-CAND_0000016,11,0.3,Strong match: Accountant | Helping teams scale with 5.0 YoE. Solid skills (none) and excellent platform activity metrics.
-CAND_0000023,12,0.2846,Strong match: Software Engineer | Cloud & DevOps with 4.0 YoE. Solid skills (rag) and excellent platform activity metrics.
-CAND_0000035,13,0.2846,Strong match: Full Stack Developer | Backend systems & APIs with 4.0 YoE. Solid skills (rag) and excellent platform activity metrics.
-CAND_0000039,14,0.24,Strong match: Marketing Manager | Helping teams scale with 4.0 YoE. Solid skills (none) and excellent platform activity metrics.
-CAND_0000009,15,0.21,Strong match: Mechanical Engineer | Driving business outcomes with 11.0 YoE. Solid skills (none) and excellent platform activity metrics.
-CAND_0000036,16,0.21,Strong match: Project Manager | 11.3+ yrs experience with 11.0 YoE. Solid skills (none) and excellent platform activity metrics.
-CAND_0000049,17,0.2096,Strong match: Mechanical Engineer | Helping teams scale with 12.0 YoE. Solid skills (llm) and excellent platform activity metrics.
-CAND_0000037,18,0.1196,Strong match: Business Analyst | 14.3+ yrs experience with 14.0 YoE. Solid skills (llm) and excellent platform activity metrics.
-CAND_0000043,19,0.1168,"Cloud Engineer | Full-stack development with 8.0 YoE. Matched AI skills: llm, rag. Poor recruiter response metrics down-weighted fit."
-CAND_0000018,20,0.1034,Frontend Engineer | Full-stack development with 7.0 YoE. Matched AI skills: rag. Poor recruiter response metrics down-weighted fit.
-CAND_0000038,21,0.1034,Java Developer | Cloud & DevOps with 7.0 YoE. Matched AI skills: rag. Poor recruiter response metrics down-weighted fit.
-CAND_0000046,22,0.1034,Mechanical Engineer | 7.8+ yrs experience with 8.0 YoE. Matched AI skills: llm. Poor recruiter response metrics down-weighted fit.
-CAND_0000002,23,0.1,Profile fails title checks (Operations Manager). High-risk keyword stuffer profile.
-CAND_0000003,24,0.1,Profile fails title checks (Customer Support). High-risk keyword stuffer profile.
-CAND_0000004,25,0.1,Profile fails title checks (Marketing Manager). High-risk keyword stuffer profile.
-CAND_0000005,26,0.1,Profile fails title checks (Accountant). High-risk keyword stuffer profile.
-CAND_0000006,27,0.1,Business Analyst | 6.0+ yrs experience with 6.0 YoE. Matched AI skills: none. Poor recruiter response metrics down-weighted fit.
-CAND_0000007,28,0.1,Civil Engineer | 5.5+ yrs experience with 6.0 YoE. Matched AI skills: none. Poor recruiter response metrics down-weighted fit.
-CAND_0000008,29,0.1,Profile fails title checks (Operations Manager). High-risk keyword stuffer profile.
-CAND_0000011,30,0.1,"QA Engineer | Cloud & DevOps with 2.0 YoE. Matched AI skills: rag, transformers. Poor recruiter response metrics down-weighted fit."
-CAND_0000012,31,0.1,Profile fails title checks (Operations Manager). High-risk keyword stuffer profile.
-CAND_0000013,32,0.1,Civil Engineer | Driving business outcomes with 1.0 YoE. Matched AI skills: none. Poor recruiter response metrics down-weighted fit.
-CAND_0000017,33,0.1,Accountant | 12.3+ yrs experience with 12.0 YoE. Matched AI skills: none. Poor recruiter response metrics down-weighted fit.
-CAND_0000019,34,0.1,Profile fails title checks (Project Manager). High-risk keyword stuffer profile.
-CAND_0000021,35,0.1,Profile fails title checks (Project Manager). High-risk keyword stuffer profile.
-CAND_0000024,36,0.1,Profile fails title checks (HR Manager). High-risk keyword stuffer profile.
-CAND_0000026,37,0.1,Profile fails title checks (Graphic Designer). High-risk keyword stuffer profile.
-CAND_0000028,38,0.1,Profile fails title checks (Operations Manager). High-risk keyword stuffer profile.
-CAND_0000029,39,0.1,Business Analyst | Driving business outcomes with 7.0 YoE. Matched AI skills: none. Poor recruiter response metrics down-weighted fit.
-CAND_0000030,40,0.1,Profile fails title checks (Marketing Manager). High-risk keyword stuffer profile.
-CAND_0000033,41,0.1,Profile fails title checks (Graphic Designer). High-risk keyword stuffer profile.
-CAND_0000034,42,0.1,Inactive candidate (last active: 2026-01-03). Suppressed due to behavioral honeypot indicators.
-CAND_0000040,43,0.1,Profile fails title checks (Customer Support). High-risk keyword stuffer profile.
-CAND_0000041,44,0.1,Operations Manager | Helping teams scale with 14.0 YoE. Matched AI skills: llm. Poor recruiter response metrics down-weighted fit.
-CAND_0000042,45,0.1,Profile fails title checks (HR Manager). High-risk keyword stuffer profile.
-CAND_0000045,46,0.1,Project Manager | 12.2+ yrs experience with 12.0 YoE. Matched AI skills: none. Poor recruiter response metrics down-weighted fit.
-CAND_0000047,47,0.1,Profile fails title checks (Project Manager). High-risk keyword stuffer profile.
-CAND_0000048,48,0.1,Mobile Developer | Full-stack development with 10.0 YoE. Matched AI skills: rag. Poor recruiter response metrics down-weighted fit.
-CAND_0000050,49,0.1,Profile fails title checks (Business Analyst). High-risk keyword stuffer profile.
-CAND_0000022,50,0.0,Mechanical Engineer | Driving business outcomes with 1.0 YoE. Matched AI skills: llm. Poor recruiter response metrics down-weighted fit.
+CAND_0000031,1,0.7461,"Experienced Recommendation Systems Engineer with 6.0 YoE at Swiggy and Mad Street Den. Strong hands-on expertise in FAISS, Pinecone, Embeddings aligns well with the search/retrieval requirements. Note: Located in India and will require relocation to Pune/Noida."
+CAND_0000032,2,0.7,Experienced .NET Developer with 8.0 YoE at Cognizant and HCL. Strong hands-on expertise in Embeddings aligns well with the search/retrieval requirements. Note: Located in India and will require relocation to Pune/Noida.
+CAND_0000015,3,0.657,"Experienced Software Engineer with 5.0 YoE at Razorpay and Hooli. Strong hands-on expertise in PyTorch, Qdrant aligns well with the search/retrieval requirements. Note: Located in India and will require relocation to Pune/Noida."
+CAND_0000014,4,0.637,"Experienced Frontend Engineer with 8.0 YoE at Zomato and Dunder Mifflin. Strong hands-on expertise in FAISS, OpenSearch aligns well with the search/retrieval requirements. Note: Located in India and will require relocation to Pune/Noida."
+CAND_0000044,5,0.634,"Experienced Frontend Engineer with 6.0 YoE at Tech Mahindra and Hooli. Strong hands-on expertise in Hadoop, JavaScript aligns well with the search/retrieval requirements. Note: Located in India and will require relocation to Pune/Noida."
+CAND_0000001,6,0.618,"Experienced Backend Engineer with 7.0 YoE at Mindtree and Dunder Mifflin. Strong hands-on expertise in Fine-tuning LLMs, LoRA, Milvus aligns well with the search/retrieval requirements. Note: Located in India and will require relocation to Pune/Noida."
+CAND_0000010,7,0.606,Experienced Data Engineer with 5.0 YoE at Ola. Strong hands-on expertise in Elasticsearch aligns well with the search/retrieval requirements. Note: Located in India and will require relocation to Pune/Noida.
+CAND_0000025,8,0.595,"Experienced Frontend Engineer with 7.0 YoE at Tech Mahindra and Mindtree. Strong hands-on expertise in JavaScript, Spark aligns well with the search/retrieval requirements. Note: Located in India and will require relocation to Pune/Noida."
+CAND_0000023,9,0.538,"Experienced Software Engineer with 4.0 YoE at Acme Corp and Flipkart. Strong hands-on expertise in BigQuery, Marketing aligns well with the search/retrieval requirements. Note: Experience (4.0 YoE) is below the preferred 5-9 year band, and located in India and will require relocation to Pune/Noida."
+CAND_0000035,10,0.475,"Experienced Full Stack Developer with 4.0 YoE at Globex Inc and Wipro. Strong hands-on expertise in Snowflake, BigQuery aligns well with the search/retrieval requirements. Note: Experience (4.0 YoE) is below the preferred 5-9 year band, and located in India and will require relocation to Pune/Noida."
+CAND_0000036,11,0.428,"Experienced Project Manager with 11.0 YoE at Initech and Hooli. Strong hands-on expertise in Figma, MongoDB aligns well with the search/retrieval requirements. Note: YoE (11.0 years) is slightly above the target 5-9 year envelope, and located in India and will require relocation to Pune/Noida."
+CAND_0000037,12,0.38,"Experienced Business Analyst with 14.0 YoE at Stark Industries and Initech. Strong hands-on expertise in Databricks, Docker aligns well with the search/retrieval requirements. Note: YoE (14.0 years) is slightly above the target 5-9 year envelope, and located in India and will require relocation to Pune/Noida."
+CAND_0000027,13,0.2244,"Experienced DevOps Engineer with 4.0 YoE at Infosys and Wipro. Strong hands-on expertise in Information Retrieval aligns well with the search/retrieval requirements. Note: Experience (4.0 YoE) is below the preferred 5-9 year band, career is focused on services/consulting firms rather than product spaces, and located in India and will require relocation to Pune/Noida."
+CAND_0000002,14,0.05,"Experienced Operations Manager with 12.0 YoE at Wipro and Acme Corp. Strong hands-on expertise in Project Management, React aligns well with the search/retrieval requirements. Note: YoE (12.0 years) is slightly above the target 5-9 year envelope, and located in India and will require relocation to Pune/Noida."
+CAND_0000003,15,0.05,"Experienced Customer Support with 1.0 YoE at TCS. Strong hands-on expertise in Angular, SEO aligns well with the search/retrieval requirements. Note: Experience (1.0 YoE) is below the preferred 5-9 year band, career is focused on services/consulting firms rather than product spaces, and located in India and will require relocation to Pune/Noida."
+CAND_0000005,16,0.05,"Experienced Accountant with 11.0 YoE at Stark Industries and Wipro. Strong hands-on expertise in SQL, PowerPoint aligns well with the search/retrieval requirements. Note: YoE (11.0 years) is slightly above the target 5-9 year envelope, and located in India and will require relocation to Pune/Noida."
+CAND_0000008,17,0.05,"Experienced Operations Manager with 4.0 YoE at Wipro. Strong hands-on expertise in Java, BigQuery aligns well with the search/retrieval requirements. Note: Experience (4.0 YoE) is below the preferred 5-9 year band, career is focused on services/consulting firms rather than product spaces, and located in India and will require relocation to Pune/Noida."
+CAND_0000009,18,0.05,"Experienced Mechanical Engineer with 11.0 YoE at Dunder Mifflin and Wipro. Strong hands-on expertise in Snowflake, gRPC aligns well with the search/retrieval requirements. Note: YoE (11.0 years) is slightly above the target 5-9 year envelope, and located in India and will require relocation to Pune/Noida."
+CAND_0000016,19,0.05,"Experienced Accountant with 5.0 YoE at Infosys and TCS. Strong hands-on expertise in Node.js, Figma aligns well with the search/retrieval requirements. Note: Located in India and will require relocation to Pune/Noida."
+CAND_0000020,20,0.05,"Experienced Mechanical Engineer with 6.0 YoE at Wipro and Stark Industries. Strong hands-on expertise in GraphQL, TypeScript aligns well with the search/retrieval requirements. Note: Located in India and will require relocation to Pune/Noida."
+CAND_0000021,21,0.05,"Experienced Project Manager with 14.0 YoE at Wipro and Infosys. Strong hands-on expertise in Fine-tuning LLMs, Pinecone, Embeddings aligns well with the search/retrieval requirements. Note: YoE (14.0 years) is slightly above the target 5-9 year envelope, and located in India and will require relocation to Pune/Noida."
+CAND_0000024,22,0.05,"Experienced HR Manager with 8.0 YoE at TCS and Infosys. Strong hands-on expertise in Figma, Kubernetes aligns well with the search/retrieval requirements. Note: Career is focused on services/consulting firms rather than product spaces, and located in India and will require relocation to Pune/Noida."
+CAND_0000030,23,0.05,"Experienced Marketing Manager with 10.0 YoE at Dunder Mifflin and Hooli. Strong hands-on expertise in gRPC, Apache Beam aligns well with the search/retrieval requirements. Note: YoE (10.0 years) is slightly above the target 5-9 year envelope, and located in India and will require relocation to Pune/Noida."
+CAND_0000039,24,0.05,"Experienced Marketing Manager with 4.0 YoE at Acme Corp and Stark Industries. Strong hands-on expertise in Spark, Tailwind aligns well with the search/retrieval requirements. Note: Experience (4.0 YoE) is below the preferred 5-9 year band, and located in India and will require relocation to Pune/Noida."
+CAND_0000040,25,0.05,"Experienced Customer Support with 2.0 YoE at Globex Inc. Strong hands-on expertise in SQL, Spring Boot aligns well with the search/retrieval requirements. Note: Experience (2.0 YoE) is below the preferred 5-9 year band, and located in India and will require relocation to Pune/Noida."
+CAND_0000047,26,0.05,"Experienced Project Manager with 2.0 YoE at TCS. Strong hands-on expertise in FastAPI, Java aligns well with the search/retrieval requirements. Note: Experience (2.0 YoE) is below the preferred 5-9 year band, career is focused on services/consulting firms rather than product spaces, and located in India and will require relocation to Pune/Noida."
+CAND_0000049,27,0.05,"Experienced Mechanical Engineer with 12.0 YoE at Wayne Enterprises and Hooli. Strong hands-on expertise in TypeScript, Rust aligns well with the search/retrieval requirements. Note: YoE (12.0 years) is slightly above the target 5-9 year envelope, and located in India and will require relocation to Pune/Noida."
+CAND_0000050,28,0.05,"Experienced Business Analyst with 14.0 YoE at Infosys and TCS. Strong hands-on expertise in gRPC, SEO aligns well with the search/retrieval requirements. Note: YoE (14.0 years) is slightly above the target 5-9 year envelope, and located in India and will require relocation to Pune/Noida."
+CAND_0000004,29,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000006,30,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000007,31,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000011,32,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000012,33,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000013,34,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000017,35,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000018,36,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000019,37,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000022,38,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000026,39,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000028,40,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000029,41,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000033,42,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000034,43,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000038,44,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000041,45,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000042,46,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000043,47,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000045,48,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000046,49,0.0,Disqualified: Honeypot or duplicate profile indicator.
+CAND_0000048,50,0.0,Disqualified: Honeypot or duplicate profile indicator.

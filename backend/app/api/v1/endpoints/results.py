@@ -32,10 +32,24 @@ async def get_latest_results(
 
         candidates = await cursor.to_list(length=top_n)
 
-        # Re-assign ranks 1..N based on global sort order
+        # Fetch the most recent rankings doc for top-3 reasoning
+        latest_ranking = await db["rankings"].find_one(
+            {}, sort=[("run_at", -1)], projection={"_id": 0, "candidates": 1}
+        )
+
+        # Build a lookup of candidate_id → reasoning from rankings
+        reasoning_map: dict = {}
+        if latest_ranking and "candidates" in latest_ranking:
+            for rc in latest_ranking["candidates"][:3]:
+                reasoning_map[rc["candidate_id"]] = rc.get("reasoning", "")
+
+        # Re-assign ranks 1..N and enrich reasoning for top-3
         for i, c in enumerate(candidates):
             c["rank"] = i + 1
             c["score"] = c["last_score"]  # alias for frontend
+            # Use reasoning from rankings if candidate doc lacks it
+            if not c.get("reasoning") and c["candidate_id"] in reasoning_map:
+                c["reasoning"] = reasoning_map[c["candidate_id"]]
 
         total = await db["candidates"].count_documents({"last_score": {"$gt": 0}})
 

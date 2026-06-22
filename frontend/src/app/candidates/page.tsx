@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { getCached, setCached } from "@/lib/dataCache";
 
 interface Skill {
   name: string;
@@ -47,6 +48,14 @@ export default function CandidatesPage() {
     setToken(localStorage.getItem("token"));
   }, []);
 
+  // Lock body scroll when detail drawer is open
+  useEffect(() => {
+    document.body.style.overflow = selected ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [selected]);
+
   // Debounce search input by 300ms
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -61,6 +70,16 @@ export default function CandidatesPage() {
 
   // Fetch candidates from database
   useEffect(() => {
+    const cacheKey = `candidates:${debouncedSearch}:${minYoe}:${maxYoe}:${minScore}:${sourceFilter}:${page}`;
+
+    const cached = getCached<{ candidates: Candidate[]; total: number }>(cacheKey);
+    if (cached) {
+      setCandidates(cached.candidates);
+      setTotal(cached.total);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     const params = new URLSearchParams();
     if (debouncedSearch) params.set("search", debouncedSearch);
@@ -77,8 +96,10 @@ export default function CandidatesPage() {
     fetch(`${API_BASE_URL}/candidates?${params}`)
       .then((r) => r.json())
       .then((data) => {
-        setCandidates(data.candidates || []);
-        setTotal(data.total || 0);
+        const result = { candidates: data.candidates || [], total: data.total || 0 };
+        setCandidates(result.candidates);
+        setTotal(result.total);
+        setCached(cacheKey, result, 30_000); // 30 s TTL for search results
         setLoading(false);
       })
       .catch((err) => {
@@ -193,8 +214,8 @@ export default function CandidatesPage() {
         </div>
       </header>
 
-      {/* Filter Row */}
-      <div className="px-6 py-3 border-b border-tm-border flex items-center gap-3 bg-white shrink-0">
+      {/* Filter Row — stacks on mobile, horizontal on md+ */}
+      <div className="px-4 md:px-6 py-3 border-b border-tm-border flex flex-col md:flex-row items-stretch md:items-center gap-2 bg-white shrink-0">
         <div className="relative flex-1">
           <i className="ti ti-search absolute left-3 top-1/2 -translate-y-1/2 text-tm-muted text-sm" />
           <input
@@ -206,35 +227,38 @@ export default function CandidatesPage() {
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-[12px] text-tm-muted font-medium">YoE:</span>
-          <input
-            type="number"
-            value={minYoe}
-            onChange={handleMinYoeChange}
-            placeholder="Min"
-            className="w-[60px] h-9 px-2 border border-tm-border rounded-[8px] text-[13px] focus:outline-none focus:border-tm-text text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-          />
-          <span className="text-tm-muted text-xs">—</span>
-          <input
-            type="number"
-            value={maxYoe}
-            onChange={handleMaxYoeChange}
-            placeholder="Max"
-            className="w-[60px] h-9 px-2 border border-tm-border rounded-[8px] text-[13px] focus:outline-none focus:border-tm-text text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-          />
-        </div>
+        {/* Filter chips — horizontally scrollable on mobile */}
+        <div className="flex gap-2 overflow-x-auto pb-0.5 md:pb-0 flex-shrink-0">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <span className="text-[12px] text-tm-muted font-medium">YoE:</span>
+            <input
+              type="number"
+              value={minYoe}
+              onChange={handleMinYoeChange}
+              placeholder="Min"
+              className="w-[60px] h-9 px-2 border border-tm-border rounded-[8px] text-[13px] focus:outline-none focus:border-tm-text text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            />
+            <span className="text-tm-muted text-xs">—</span>
+            <input
+              type="number"
+              value={maxYoe}
+              onChange={handleMaxYoeChange}
+              placeholder="Max"
+              className="w-[60px] h-9 px-2 border border-tm-border rounded-[8px] text-[13px] focus:outline-none focus:border-tm-text text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            />
+          </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-[12px] text-tm-muted font-medium">Score:</span>
-          <input
-            type="number"
-            step="0.01"
-            value={minScore}
-            onChange={handleMinScoreChange}
-            placeholder="0.00–1.00"
-            className="w-[90px] h-9 px-2 border border-tm-border rounded-[8px] text-[13px] focus:outline-none focus:border-tm-text text-center"
-          />
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <span className="text-[12px] text-tm-muted font-medium">Score:</span>
+            <input
+              type="number"
+              step="0.01"
+              value={minScore}
+              onChange={handleMinScoreChange}
+              placeholder="0.00–1.00"
+              className="w-[90px] h-9 px-2 border border-tm-border rounded-[8px] text-[13px] focus:outline-none focus:border-tm-text text-center"
+            />
+          </div>
         </div>
       </div>
 
@@ -276,8 +300,8 @@ export default function CandidatesPage() {
         ) : (
           /* Grid Pseudotable Container */
           <div className="border border-tm-border rounded-[12px] overflow-hidden bg-white flex flex-col">
-            {/* Header */}
-            <div className="bg-tm-surface text-[11px] uppercase tracking-wider text-tm-muted border-b border-tm-border py-2.5 px-4 flex items-center font-medium">
+            {/* Header — hidden on mobile */}
+            <div className="hidden md:flex bg-tm-surface text-[11px] uppercase tracking-wider text-tm-muted border-b border-tm-border py-2.5 px-4 items-center font-medium">
               <div className="w-[50px] shrink-0">Rank</div>
               <div className="flex-1 min-w-0 pr-4">Candidate</div>
               <div className="flex-1 min-w-0 pr-4">Title</div>
@@ -295,60 +319,95 @@ export default function CandidatesPage() {
                   <div
                     key={cand.candidate_id}
                     onClick={() => setSelected(cand)}
-                    className="hover:bg-tm-surface/50 transition-colors flex items-center py-3 px-4 text-left w-full cursor-pointer"
+                    className="hover:bg-tm-surface/50 transition-colors cursor-pointer border-b border-tm-border last:border-0"
                   >
-                    {/* Rank cell */}
-                    <div
-                      className={`w-[50px] shrink-0 font-medium ${
-                        isTop3 ? "text-[#B8820A]" : "text-tm-muted"
-                      }`}
-                    >
-                      #{cand.last_rank}
-                    </div>
-
-                    {/* Candidate cell */}
-                    <div className="flex-1 min-w-0 pr-4 flex flex-col gap-0.5">
-                      <span className="font-medium truncate text-tm-text">{cand.candidate_id}</span>
-                      <span className="text-[11px] text-tm-muted truncate">
-                        {cand.name || "—"}
-                      </span>
-                    </div>
-
-                    {/* Title cell */}
-                    <div className="flex-1 min-w-0 pr-4 text-[12px] text-tm-text truncate">
-                      {cand.current_title || "—"}
-                    </div>
-
-                    {/* Score cell */}
-                    <div className="w-[100px] shrink-0 pr-4 flex items-center gap-2">
-                      <div className="flex-1 h-1.5 bg-zinc-100 rounded-[2px] overflow-hidden">
+                    {/* Mobile card */}
+                    <div className="md:hidden p-4 flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 min-w-0">
                         <div
-                          className="h-full bg-tm-accent"
-                          style={{
-                            width: `${Math.min(1.0, Math.max(0.0, cand.last_score)) * 100}%`,
-                          }}
-                        />
+                          className={`text-[13px] font-medium w-7 shrink-0 mt-0.5 ${
+                            isTop3 ? "text-[#B8820A]" : "text-tm-muted"
+                          }`}
+                        >
+                          #{cand.last_rank}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[13px] font-medium text-tm-text truncate">
+                            {cand.candidate_id}
+                          </div>
+                          <div className="text-[11px] text-tm-muted mt-0.5 truncate">
+                            {cand.current_title || "—"} · {cand.years_of_experience} yrs
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[12px] font-medium text-tm-text">
+                              {cand.last_score != null ? Number(cand.last_score).toFixed(2) : "—"}
+                            </span>
+                            <span className={getSourcePillClass(cand.upload_source)}>
+                              {cand.upload_source}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                      <span className="text-[12px] font-mono text-tm-text shrink-0 w-[28px] text-right">
-                        {cand.last_score.toFixed(2)}
-                      </span>
+                      <div className="text-[11px] text-tm-muted shrink-0 mt-0.5">
+                        {formatRelative(cand.last_seen)}
+                      </div>
                     </div>
 
-                    {/* YoE cell */}
-                    <div className="w-[60px] shrink-0 pr-4 text-tm-text text-[12px]">
-                      {cand.years_of_experience} yrs
-                    </div>
+                    {/* Desktop grid row */}
+                    <div className="hidden md:flex items-center py-3 px-4 text-left w-full">
+                      {/* Rank cell */}
+                      <div
+                        className={`w-[50px] shrink-0 font-medium ${
+                          isTop3 ? "text-[#B8820A]" : "text-tm-muted"
+                        }`}
+                      >
+                        #{cand.last_rank}
+                      </div>
 
-                    {/* Source cell */}
-                    <div className="w-[80px] shrink-0 pr-4">
-                      <span className={getSourcePillClass(cand.upload_source)}>
-                        {cand.upload_source}
-                      </span>
-                    </div>
+                      {/* Candidate cell */}
+                      <div className="flex-1 min-w-0 pr-4 flex flex-col gap-0.5">
+                        <span className="font-medium truncate text-tm-text">{cand.candidate_id}</span>
+                        <span className="text-[11px] text-tm-muted truncate">
+                          {cand.name || "—"}
+                        </span>
+                      </div>
 
-                    {/* Last seen cell */}
-                    <div className="w-[120px] shrink-0 text-right text-tm-muted text-[12px]">
-                      {formatRelative(cand.last_seen)}
+                      {/* Title cell */}
+                      <div className="flex-1 min-w-0 pr-4 text-[12px] text-tm-text truncate">
+                        {cand.current_title || "—"}
+                      </div>
+
+                      {/* Score cell */}
+                      <div className="w-[100px] shrink-0 pr-4 flex items-center gap-2">
+                        <div className="flex-1 h-1.5 bg-zinc-100 rounded-[2px] overflow-hidden">
+                          <div
+                            className="h-full bg-tm-accent"
+                            style={{
+                              width: `${Math.min(1.0, Math.max(0.0, cand.last_score)) * 100}%`,
+                            }}
+                          />
+                        </div>
+                        <span className="text-[12px] font-mono text-tm-text shrink-0 w-[28px] text-right">
+                          {cand.last_score != null ? Number(cand.last_score).toFixed(2) : "—"}
+                        </span>
+                      </div>
+
+                      {/* YoE cell */}
+                      <div className="w-[60px] shrink-0 pr-4 text-tm-text text-[12px]">
+                        {cand.years_of_experience} yrs
+                      </div>
+
+                      {/* Source cell */}
+                      <div className="w-[80px] shrink-0 pr-4">
+                        <span className={getSourcePillClass(cand.upload_source)}>
+                          {cand.upload_source}
+                        </span>
+                      </div>
+
+                      {/* Last seen cell */}
+                      <div className="w-[120px] shrink-0 text-right text-tm-muted text-[12px]">
+                        {formatRelative(cand.last_seen)}
+                      </div>
                     </div>
                   </div>
                 );
@@ -381,141 +440,152 @@ export default function CandidatesPage() {
         </div>
       )}
 
-      {/* Selected Drawer Backdrop */}
+      {/* Backdrop */}
       {selected && (
         <div
           onClick={() => setSelected(null)}
-          className="fixed inset-0 bg-black/15 z-40 transition-opacity duration-300"
+          className="fixed inset-0 bg-black/30 z-40 transition-opacity duration-300"
         />
       )}
 
-      {/* Drawer */}
+      {/* Drawer panel — full screen on mobile, right sheet on md+ */}
       <div
-        className={`fixed right-0 top-0 h-full w-[400px] bg-white border-l border-tm-border z-50 flex flex-col p-6 shadow-xl transition-transform duration-300 ease-out transform ${
-          selected ? "translate-x-0" : "translate-x-full"
-        }`}
+        className={[
+          "fixed z-50 bg-white shadow-xl flex flex-col",
+          "transition-transform duration-300 ease-out",
+          // Mobile: full viewport
+          "inset-0",
+          // Tablet+: right-side sheet, full height
+          "md:inset-y-0 md:left-auto md:right-0 md:w-[420px]",
+          selected ? "translate-x-0" : "translate-x-full",
+        ].join(" ")}
       >
         {selected && (
-          <div className="flex-1 flex flex-col gap-6 overflow-y-auto pr-1">
+          <>
             {/* Header */}
-            <div className="flex justify-between items-start">
-              <div className="flex flex-col gap-0.5">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-tm-border shrink-0">
+              <div className="flex flex-col gap-0.5 min-w-0 pr-2">
                 <span className="text-[11px] uppercase tracking-wider text-tm-muted font-medium">
                   Candidate Profile
                 </span>
-                <h3 className="text-[16px] font-medium text-tm-text truncate w-[280px]">
+                <h3 className="text-[16px] font-medium text-tm-text truncate">
                   {selected.candidate_id}
                 </h3>
               </div>
               <button
                 onClick={() => setSelected(null)}
-                className="text-tm-muted hover:text-tm-text transition-colors p-1"
+                className="text-tm-muted hover:text-tm-text transition-colors p-1.5 rounded-lg hover:bg-tm-surface flex-shrink-0"
               >
                 <i className="ti ti-x text-lg" />
               </button>
             </div>
 
-            {/* Profile Info Section */}
-            <div className="border-t border-tm-border pt-4 flex flex-col gap-2.5">
-              <h4 className="text-[12px] uppercase tracking-wider text-tm-muted font-medium">
-                Identity Profile
-              </h4>
-              <div className="grid grid-cols-3 gap-y-2 text-[13px]">
-                <span className="text-tm-muted">Name:</span>
-                <span className="col-span-2 text-tm-text font-medium">{selected.name || "—"}</span>
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-5">
+              {/* Profile Info Section */}
+              <div className="flex flex-col gap-2.5">
+                <h4 className="text-[12px] uppercase tracking-wider text-tm-muted font-medium">
+                  Identity Profile
+                </h4>
+                <div className="grid grid-cols-3 gap-y-2 text-[13px]">
+                  <span className="text-tm-muted">Name:</span>
+                  <span className="col-span-2 text-tm-text font-medium">{selected.name || "—"}</span>
 
-                <span className="text-tm-muted">Email:</span>
-                <span className="col-span-2 text-tm-text truncate font-mono select-text">{selected.email || "—"}</span>
+                  <span className="text-tm-muted">Email:</span>
+                  <span className="col-span-2 text-tm-text truncate font-mono select-text">{selected.email || "—"}</span>
 
-                <span className="text-tm-muted">Title:</span>
-                <span className="col-span-2 text-tm-text truncate">{selected.current_title || "—"}</span>
+                  <span className="text-tm-muted">Title:</span>
+                  <span className="col-span-2 text-tm-text truncate">{selected.current_title || "—"}</span>
 
-                <span className="text-tm-muted">Experience:</span>
-                <span className="col-span-2 text-tm-text">{selected.years_of_experience} yrs</span>
-              </div>
-            </div>
-
-            {/* Score & Placement Section */}
-            <div className="border-t border-tm-border pt-4 flex flex-col gap-2.5">
-              <h4 className="text-[12px] uppercase tracking-wider text-tm-muted font-medium">
-                Pipeline Score
-              </h4>
-              <div className="flex items-baseline gap-2">
-                <span className="text-[20px] font-medium text-tm-text leading-none">
-                  {selected.last_score.toFixed(4)}
-                </span>
-                <span className="text-[12px] text-tm-muted">
-                  Ranked #{selected.last_rank} overall
-                </span>
-              </div>
-              <div className="flex items-center gap-4 text-[12px] text-tm-muted mt-1">
-                <div className="flex items-center gap-1">
-                  <i className="ti ti-clock" />
-                  <span>{formatRelative(selected.last_seen)}</span>
+                  <span className="text-tm-muted">Experience:</span>
+                  <span className="col-span-2 text-tm-text">{selected.years_of_experience} yrs</span>
                 </div>
-                <div className="flex items-center gap-1">
-                  <span className={getSourcePillClass(selected.upload_source)}>
-                    {selected.upload_source}
+              </div>
+
+              {/* Score & Placement Section */}
+              <div className="border-t border-tm-border pt-4 flex flex-col gap-2.5">
+                <h4 className="text-[12px] uppercase tracking-wider text-tm-muted font-medium">
+                  Pipeline Score
+                </h4>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[20px] font-medium text-tm-text leading-none">
+                    {selected.last_score != null ? Number(selected.last_score).toFixed(4) : "—"}
+                  </span>
+                  <span className="text-[12px] text-tm-muted">
+                    Ranked #{selected.last_rank} overall
                   </span>
                 </div>
+                <div className="flex items-center gap-4 text-[12px] text-tm-muted">
+                  <div className="flex items-center gap-1">
+                    <i className="ti ti-clock" />
+                    <span>{formatRelative(selected.last_seen)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className={getSourcePillClass(selected.upload_source)}>
+                      {selected.upload_source}
+                    </span>
+                  </div>
+                </div>
               </div>
+
+              {/* Skills Section */}
+              {selected.skills && selected.skills.length > 0 && (
+                <div className="border-t border-tm-border pt-4 flex flex-col gap-2.5">
+                  <h4 className="text-[12px] uppercase tracking-wider text-tm-muted font-medium">
+                    Skills Matrix
+                  </h4>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selected.skills.map((skill, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center bg-tm-surface px-2.5 py-1 border border-tm-border rounded-[20px] text-[12px] text-tm-text font-medium"
+                      >
+                        {skill.name}
+                        {skill.last_used_year && (
+                          <span className="text-[10px] text-tm-muted ml-1 font-mono">
+                            ({skill.last_used_year})
+                          </span>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Career History Section */}
+              {selected.career_history && selected.career_history.length > 0 && (
+                <div className="border-t border-tm-border pt-4 flex flex-col gap-2.5">
+                  <h4 className="text-[12px] uppercase tracking-wider text-tm-muted font-medium">
+                    Career History
+                  </h4>
+                  <div className="flex flex-col gap-3">
+                    {selected.career_history.map((job, i) => (
+                      <div key={i} className="flex flex-col gap-0.5 text-[13px] leading-relaxed">
+                        <div className="font-medium text-tm-text">
+                          {job.title} <span className="text-tm-muted font-normal">at</span>{" "}
+                          {job.company}
+                        </div>
+                        <div className="text-[11px] text-tm-muted font-medium">
+                          {job.years != null ? Number(job.years).toFixed(1) : "?"} yrs duration
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Skills Section */}
-            {selected.skills && selected.skills.length > 0 && (
-              <div className="border-t border-tm-border pt-4 flex flex-col gap-2.5">
-                <h4 className="text-[12px] uppercase tracking-wider text-tm-muted font-medium">
-                  Skills Matrix
-                </h4>
-                <div className="flex flex-wrap gap-1.5">
-                  {selected.skills.map((skill, i) => (
-                    <span
-                      key={i}
-                      className="inline-flex items-center bg-tm-surface px-2.5 py-1 border border-tm-border rounded-[20px] text-[12px] text-tm-text font-medium"
-                    >
-                      {skill.name}
-                      {skill.last_used_year && (
-                        <span className="text-[10px] text-tm-muted ml-1 font-mono">
-                          ({skill.last_used_year})
-                        </span>
-                      )}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Career History Section */}
-            {selected.career_history && selected.career_history.length > 0 && (
-              <div className="border-t border-tm-border pt-4 flex flex-col gap-2.5">
-                <h4 className="text-[12px] uppercase tracking-wider text-tm-muted font-medium">
-                  Career History
-                </h4>
-                <div className="flex flex-col gap-3">
-                  {selected.career_history.map((job, i) => (
-                    <div key={i} className="flex flex-col gap-0.5 text-[13px] leading-relaxed">
-                      <div className="font-medium text-tm-text">
-                        {job.title} <span className="text-tm-muted font-normal">at</span>{" "}
-                        {job.company}
-                      </div>
-                      <div className="text-[11px] text-tm-muted font-medium">
-                        {job.years.toFixed(1)} yrs duration
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+            {/* Footer close button */}
+            <div className="border-t border-tm-border px-5 py-4 shrink-0">
+              <button
+                onClick={() => setSelected(null)}
+                className="w-full text-center px-4 py-2 border border-tm-border rounded-[8px] text-[13px] text-tm-text hover:bg-tm-surface transition-colors font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </>
         )}
-        <div className="border-t border-tm-border pt-4 mt-auto shrink-0">
-          <button
-            onClick={() => setSelected(null)}
-            className="w-full text-center px-4 py-2 border border-tm-border rounded-[8px] text-[13px] text-tm-text hover:bg-tm-surface transition-colors font-medium"
-          >
-            Close
-          </button>
-        </div>
       </div>
     </div>
   );
