@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 from pymongo import UpdateOne
+import pymongo.errors
 from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 from app.core.config import settings
@@ -81,14 +82,31 @@ async def _upsert_candidates(
             total_ops = len(operations)
             logger.info(f"Upserting {total_ops} candidates to MongoDB concurrently in batches of {batch_size}...")
             
-            sem = asyncio.Semaphore(10)
-            
-            async def process_batch(i):
-                batch = operations[i:i+batch_size]
+            # Limit concurrent Atlas writes to 4 to avoid SSL/socket exhaustion
+            sem = asyncio.Semaphore(4)
+
+            async def process_batch(index):
+                batch = operations[index:index + batch_size]
                 async with sem:
-                    res = await collection.bulk_write(batch, ordered=False)
-                    logger.info(f"Progress: batch starting at index {i} completed (Upserted: {res.upserted_count}, Modified: {res.modified_count}).")
-                    return res.upserted_count, res.modified_count
+                    last_exc = None
+                    for attempt in range(1, 4):  # up to 3 attempts
+                        try:
+                            res = await collection.bulk_write(batch, ordered=False)
+                            logger.info(f"Progress: batch starting at index {index} completed.")
+                            return res.upserted_count, res.modified_count
+                        except pymongo.errors.AutoReconnect as exc:
+                            last_exc = exc
+                            wait_secs = 2 ** (attempt - 1)  # 1 s, 2 s, 4 s
+                            logger.warning(
+                                f"AutoReconnect on batch at index {index}, "
+                                f"attempt {attempt}/3 — retrying in {wait_secs}s: {exc}"
+                            )
+                            await asyncio.sleep(wait_secs)
+                    # All 3 attempts exhausted
+                    logger.error(
+                        f"Batch at index {index} failed after 3 attempts: {last_exc}"
+                    )
+                    raise last_exc
 
             tasks = [process_batch(i) for i in range(0, total_ops, batch_size)]
             results = await asyncio.gather(*tasks)
