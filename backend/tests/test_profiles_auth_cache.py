@@ -134,13 +134,14 @@ def run_around_tests():
 
 
 @patch("app.api.v1.endpoints.profiles.get_mongo_db", return_value=mock_db)
+@patch.dict(os.environ, {"ADMIN_PASSWORD": "test_admin_secret"})
 def test_admin_login(mock_get_db):
     """
     Test POST /profiles/login yields a valid signed JWT token for the admin.
+    ADMIN_PASSWORD is patched via os.environ so the endpoint doesn't return 503.
     """
-    # TODO: load from environment — never hardcode
-    response = client.post("/api/v1/profiles/login", json={"password": os.getenv("ADMIN_PASSWORD", "")})
-    assert response.status_code == 200
+    response = client.post("/api/v1/profiles/login", json={"password": "test_admin_secret"})
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
     token = response.json().get("token")
     assert token is not None
 
@@ -151,12 +152,14 @@ def test_admin_login(mock_get_db):
 
 
 @patch("app.api.v1.endpoints.profiles.get_mongo_db", return_value=mock_db)
+@patch.dict(os.environ, {"ADMIN_PASSWORD": "test_admin_secret"})
 def test_admin_login_invalid(mock_get_db):
     """
     Test POST /profiles/login rejects incorrect password.
+    ADMIN_PASSWORD is patched so the endpoint reaches password comparison (not 503).
     """
     response = client.post("/api/v1/profiles/login", json={"password": "wrongpassword"})
-    assert response.status_code == 401
+    assert response.status_code == 401, f"Expected 401, got {response.status_code}: {response.text}"
     assert "Invalid administrative passphrase" in response.json().get("detail")
 
 
@@ -165,11 +168,13 @@ def test_get_directory_unauthorized(mock_get_db):
     """
     Test GET /profiles/directory rejects requests without authentication or wrong role.
     """
-    # 1. Missing Authorization header
+    # 1. Missing Authorization header — must return 401
     response = client.get("/api/v1/profiles/directory")
-    assert response.status_code == 401
+    assert response.status_code == 401, f"Expected 401 for missing header, got {response.status_code}"
 
-    # 2. Wrong token role
+    # 2. Wrong token role — must return 403 Forbidden (not 401).
+    # RFC 7235: 401 = unauthenticated, 403 = authenticated but not authorised.
+    # verify_admin_token correctly raises HTTP_403_FORBIDDEN when role != 'admin'.
     invalid_payload = {
         "sub": "user123",
         "role": "candidate",
@@ -180,7 +185,7 @@ def test_get_directory_unauthorized(mock_get_db):
         "/api/v1/profiles/directory",
         headers={"Authorization": f"Bearer {invalid_token}"}
     )
-    assert response.status_code == 401
+    assert response.status_code == 403, f"Expected 403 for wrong role, got {response.status_code}"
     assert "Admin role required" in response.json().get("detail")
 
 

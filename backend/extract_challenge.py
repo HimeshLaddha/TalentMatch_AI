@@ -859,6 +859,21 @@ def call_llm_xai(candidates: list[dict]) -> list[dict]:
 
     Returns the full candidates list with top-3 entries augmented.
     """
+    # FIX-4: Pre-flight check - warn if no LLM API keys are configured.
+    # The pipeline still produces heuristic XAI narratives without keys,
+    # but this warning helps operators diagnose missing configuration early.
+    has_groq   = bool(os.getenv("GROQ_API_KEY", "").strip())
+    has_openai = bool(os.getenv("OPENAI_API_KEY", "").strip())
+    has_gemini = bool(os.getenv("GEMINI_API_KEY", "").strip())
+
+    if not (has_groq or has_openai or has_gemini):
+        logger.warning(
+            "call_llm_xai: No LLM API keys configured "
+            "(GROQ_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY all missing). "
+            "XAI reasoning will be heuristic-only. Set at least one key for "
+            "LLM-enriched narratives."
+        )
+
     for i, cand in enumerate(candidates[:3]):
         xai = cand.get("xai", {})
         prompts_md = "\n".join(

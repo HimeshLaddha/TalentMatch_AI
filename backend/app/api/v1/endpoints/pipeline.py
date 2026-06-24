@@ -51,7 +51,7 @@ _TMP_BASE = os.path.join(tempfile.gettempdir(), "talentmatch")
 )
 async def upload_candidates(
     file: UploadFile = File(..., description="Candidate pool file (.pdf, .docx, .json, .jsonl.gz)"),
-    _token: dict = Depends(verify_admin_token),
+    token_data: dict = Depends(verify_admin_token),
 ) -> dict:
     """
     Accepts a multipart file upload (.pdf, .docx, .json, or .jsonl.gz),
@@ -60,6 +60,13 @@ async def upload_candidates(
 
     Protected by the existing JWT admin token dependency.
     """
+    # Audit log — record every upload attempt
+    uploader = token_data.get("sub", "unknown") if token_data else "unknown"
+    logger.info(
+        "UPLOAD_ATTEMPT | user=%s | filename=%r | content_type=%r",
+        uploader, file.filename, file.content_type,
+    )
+
     filename: str = file.filename or ""
     # H-5: normalise case before extension check (Candidates.PDF must be accepted)
     fname_lower: str = filename.lower()
@@ -70,11 +77,26 @@ async def upload_candidates(
             detail="Unsupported file type. Accepted: PDF, DOCX, JSON, .jsonl.gz",
         )
 
+    # FIX-1: Sanitize filename — strip all path components to prevent path traversal
+    safe_filename = os.path.basename(filename).strip()
+    if (
+        not safe_filename
+        or safe_filename.startswith(".")
+        or safe_filename in ("..", ".")
+        or "/" in safe_filename
+        or "\\" in safe_filename
+    ):
+        safe_filename = f"upload_{uuid.uuid4().hex[:8]}.bin"
+
     job_id: str = str(uuid.uuid4())
 
     try:
         contents = await file.read()
     except Exception as exc:
+        logger.warning(
+            "UPLOAD_FAILED | user=%s | filename=%r | reason=%r",
+            uploader, file.filename, str(exc),
+        )
         logger.error("upload_candidates: failed to read file — %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -83,16 +105,23 @@ async def upload_candidates(
 
     MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500MB
     if len(contents) > MAX_UPLOAD_BYTES:
+        logger.warning(
+            "UPLOAD_FAILED | user=%s | filename=%r | reason='File too large (%d bytes)'",
+            uploader, file.filename, len(contents),
+        )
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail="File too large. Maximum size is 500MB.",
         )
 
+    # Use the original filename for format detection (extension checks already done above);
+    # use safe_filename only for any path construction inside the pipeline
     async_result = submit_ranking_pipeline(job_id, file_bytes=contents, filename=filename)
     task_id: str = async_result.id
 
     logger.info(
-        "upload_candidates: job_id=%s dispatched as task_id=%s", job_id, task_id
+        "UPLOAD_SUCCESS | user=%s | job_id=%s | filename=%r | bytes=%d",
+        uploader, job_id, safe_filename, len(contents),
     )
 
     return {
@@ -116,9 +145,18 @@ async def pipeline_status(task_id: str) -> StreamingResponse:
     falling back to MongoDB rankings collection if Celery backend is disabled.
     """
     async def event_stream() -> AsyncGenerator[str, None]:
-        db = get_mongo_db()
-        from tasks.celery_app import app as celery_app
         consecutive_errors = 0
+        db = None
+
+        # FIX-2: Initialize DB inside try so connection failures are caught gracefully
+        try:
+            db = get_mongo_db()
+        except Exception as e:
+            logger.error("SSE stream: MongoDB init failed: %s", e)
+            yield f"data: {json.dumps({'state': 'FAILURE', 'progress': 0, 'detail': 'Database connection failed'})}\n\n"
+            return
+
+        from tasks.celery_app import app as celery_app
         while True:
             try:
                 result = AsyncResult(task_id, app=celery_app)
