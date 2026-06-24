@@ -133,13 +133,18 @@ def run_around_tests():
     app.dependency_overrides.clear()
 
 
+@patch("app.api.v1.endpoints.profiles.settings")
 @patch("app.api.v1.endpoints.profiles.get_mongo_db", return_value=mock_db)
-@patch.dict(os.environ, {"ADMIN_PASSWORD": "test_admin_secret"})
-def test_admin_login(mock_get_db):
+def test_admin_login(mock_get_db, mock_settings):
     """
     Test POST /profiles/login yields a valid signed JWT token for the admin.
-    ADMIN_PASSWORD is patched via os.environ so the endpoint doesn't return 503.
+    settings.ADMIN_PASSWORD is patched directly since the endpoint reads from
+    the pydantic Settings object, not os.getenv().
     """
+    mock_settings.ADMIN_PASSWORD = "test_admin_secret"
+    mock_settings.JWT_SECRET = settings.JWT_SECRET
+    mock_settings.JWT_ALGORITHM = settings.JWT_ALGORITHM
+
     response = client.post("/api/v1/profiles/login", json={"password": "test_admin_secret"})
     assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
     token = response.json().get("token")
@@ -151,13 +156,17 @@ def test_admin_login(mock_get_db):
     assert payload.get("sub") == "admin"
 
 
+@patch("app.api.v1.endpoints.profiles.settings")
 @patch("app.api.v1.endpoints.profiles.get_mongo_db", return_value=mock_db)
-@patch.dict(os.environ, {"ADMIN_PASSWORD": "test_admin_secret"})
-def test_admin_login_invalid(mock_get_db):
+def test_admin_login_invalid(mock_get_db, mock_settings):
     """
     Test POST /profiles/login rejects incorrect password.
-    ADMIN_PASSWORD is patched so the endpoint reaches password comparison (not 503).
+    settings.ADMIN_PASSWORD is patched so the endpoint reaches password comparison (not 503).
     """
+    mock_settings.ADMIN_PASSWORD = "test_admin_secret"
+    mock_settings.JWT_SECRET = settings.JWT_SECRET
+    mock_settings.JWT_ALGORITHM = settings.JWT_ALGORITHM
+
     response = client.post("/api/v1/profiles/login", json={"password": "wrongpassword"})
     assert response.status_code == 401, f"Expected 401, got {response.status_code}: {response.text}"
     assert "Invalid administrative passphrase" in response.json().get("detail")

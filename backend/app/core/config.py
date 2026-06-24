@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     MONGO_URI: str | None = None
     JWT_SECRET: str = "super-secret-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"
+    # Admin password — loaded from .env; empty string means auth is not configured
+    ADMIN_PASSWORD: str = ""
 
     model_config = SettingsConfigDict(env_file=[".env", "backend/.env", "../.env"], extra="ignore")
 
