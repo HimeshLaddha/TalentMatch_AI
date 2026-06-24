@@ -61,8 +61,10 @@ async def upload_candidates(
     Protected by the existing JWT admin token dependency.
     """
     filename: str = file.filename or ""
+    # H-5: normalise case before extension check (Candidates.PDF must be accepted)
+    fname_lower: str = filename.lower()
     allowed = {".jsonl.gz", ".json", ".pdf", ".docx"}
-    if not any(filename.endswith(ext) for ext in allowed):
+    if not any(fname_lower.endswith(ext) for ext in allowed):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unsupported file type. Accepted: PDF, DOCX, JSON, .jsonl.gz",

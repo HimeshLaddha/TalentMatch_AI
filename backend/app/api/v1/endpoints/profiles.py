@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 import uuid
 import hashlib
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Header
@@ -38,7 +39,8 @@ _METADATA_FILE = _STORAGE_DIR / "metadata.json"
 # Cache & Database Connections
 # ---------------------------------------------------------------------------
 # Application-level memory cache dict mapping file MD5 checksum strings to parsed JSON documents
-RESUME_EXTRACTION_CACHE: dict[str, dict] = {}
+_MAX_CACHE_ENTRIES = 1000                                 # cap in-memory resume cache (L-1)
+RESUME_EXTRACTION_CACHE: OrderedDict[str, dict] = OrderedDict()
 
 _mongo_client: AsyncIOMotorClient | None = None
 
@@ -95,11 +97,12 @@ async def verify_admin_token(authorization: str = Header(None)) -> dict:
     role = payload.get("role")
     if role != "admin":
         logger.error(f"Authentication failed: Access forbidden for role '{role}'")
+        # H-2: wrong role = Forbidden (403), not Unauthorised (401)
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="Access forbidden: Admin role required",
         )
-    
+
     return payload
 
 
@@ -117,16 +120,23 @@ async def login_admin(payload: LoginRequest):
     """
     Validates the administrative password and returns a signed JWT token on success.
     """
-    # TODO: load from environment — never hardcode
-    if payload.password == os.getenv("ADMIN_PASSWORD", ""):
+    # M-1: reject requests immediately if ADMIN_PASSWORD is not configured
+    admin_password = os.getenv("ADMIN_PASSWORD", "")
+    if not admin_password:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Admin authentication is not configured on this server.",
+        )
+    if payload.password == admin_password:
         token_payload = {
             "sub": "admin",
             "role": "admin",
-            "exp": datetime.now(timezone.utc).timestamp() + 86400  # 24 hour token
+            # H-1: exp must be an integer per RFC 7519 §4.1.4
+            "exp": int(datetime.now(timezone.utc).timestamp()) + 86400,
         }
         token = jwt.encode(token_payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
         return {"token": token}
-    
+
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid administrative passphrase",
@@ -290,7 +300,8 @@ async def evaluate_and_sync(
 
     # Map database docs into the shape extractors.normalize / score_all expects
     candidates_to_score = []
-    from parsers.extractors import normalize
+    # M-2/M-3: import helpers added during hardening
+    from parsers.extractors import normalize, _get_first_present, DEFAULT_LAST_ACTIVE_DATE
 
     for doc in profiles_raw:
         # Pre-process raw dict to match normalize input
@@ -320,9 +331,12 @@ async def evaluate_and_sync(
         sig_raw = doc.get("platform_signals") or doc.get("redrob_signals") or {}
         
         # Determine years of experience and cast to float safely
-        yoe_raw = doc.get("years_of_experience") or doc.get("yearsOfExperience") or doc.get("yoe")
+        # M-3: use _get_first_present so yoe=0 is not swallowed by falsy `or`
+        yoe_raw = _get_first_present(doc, "years_of_experience", "yearsOfExperience", "yoe")
         if yoe_raw is None and isinstance(doc.get("profile"), dict):
-            yoe_raw = doc["profile"].get("years_of_experience") or doc["profile"].get("yearsOfExperience") or doc["profile"].get("yoe")
+            yoe_raw = _get_first_present(
+                doc["profile"], "years_of_experience", "yearsOfExperience", "yoe"
+            )
         
         try:
             if yoe_raw is None or str(yoe_raw).strip() == "":
@@ -371,7 +385,8 @@ async def evaluate_and_sync(
             "redrob_signals": {
                 "recruiter_response_rate": resp_rate,
                 "interview_completion_rate": comp_rate,
-                "last_active_date": sig_raw.get("last_active_date") or "2026-01-01"
+                # M-2: use the shared constant (today's date) instead of stale literal
+                "last_active_date": sig_raw.get("last_active_date") or DEFAULT_LAST_ACTIVE_DATE
             }
         }
         
@@ -671,7 +686,7 @@ async def upload_resume_file(
         md5_hash: str = hashlib.md5(contents).hexdigest()
 
         # 2. Asynchronously upsert all candidates in MongoDB with a concurrency limit
-        mongo_sem = asyncio.Semaphore(100)
+        mongo_sem = asyncio.Semaphore(8)   # H-3: Atlas connection-pool safe limit
         async def upsert_mongo(cand: CandidateProfile) -> None:
             async with mongo_sem:
                 cand_data = cand.model_dump()
@@ -849,6 +864,9 @@ async def upload_resume_file(
 
     # 6. Push variables to the cache memory dict
     RESUME_EXTRACTION_CACHE[md5_hash] = profile.model_dump()
+    # L-1: evict oldest entry when cache exceeds cap (OrderedDict preserves insertion order)
+    if len(RESUME_EXTRACTION_CACHE) > _MAX_CACHE_ENTRIES:
+        RESUME_EXTRACTION_CACHE.popitem(last=False)
 
     # 7. Index multi-vectors inside Qdrant
     try:
@@ -923,25 +941,30 @@ async def trigger_database_recovery_sync(
             },
         )
 
-    synced: int = 0
-    failed: int = 0
-    errors: list = []
+    # M-4: concurrent re-indexing with semaphore — replaces slow sequential loop
+    _sync_sem = asyncio.Semaphore(10)
 
-    for raw_profile in profiles_raw:
+    async def _sync_one(raw_profile: dict) -> dict:
         cid: str = raw_profile.get("id") or raw_profile.get("candidate_id", "unknown")
         try:
-            # Strip MongoDB-specific keys to validate clean candidate profile schema
-            clean_profile = {k: v for k, v in raw_profile.items() if k not in ("_id", "stored_at", "profile_path", "md5_hash")}
-            profile = CandidateProfile.model_validate(clean_profile)
-            await vector_store.upsert_candidate(profile, embedder)
-            synced += 1
+            clean_profile = {
+                k: v for k, v in raw_profile.items()
+                if k not in ("_id", "stored_at", "profile_path", "md5_hash")
+            }
+            profile_obj = CandidateProfile.model_validate(clean_profile)
+            async with _sync_sem:
+                await vector_store.upsert_candidate(profile_obj, embedder)
             logger.info(f"sync-recovery: Re-indexed candidate '{cid}'.")
+            return {"ok": True, "cid": cid}
         except Exception as exc:
-            failed += 1
-            errors.append({"candidate_id": cid, "error": str(exc)})
-            logger.warning(
-                f"sync-recovery: Failed to re-index candidate '{cid}': {exc}"
-            )
+            logger.warning(f"sync-recovery: Failed to re-index candidate '{cid}': {exc}")
+            return {"ok": False, "cid": cid, "error": str(exc)}
+
+    sync_results = await asyncio.gather(*[_sync_one(p) for p in profiles_raw])
+
+    synced  = sum(1 for r in sync_results if r["ok"])
+    failed  = sum(1 for r in sync_results if not r["ok"])
+    errors  = [{"candidate_id": r["cid"], "error": r["error"]} for r in sync_results if not r["ok"]]
 
     overall_status = (
         "ok" if failed == 0 else ("partial" if synced > 0 else "failed")

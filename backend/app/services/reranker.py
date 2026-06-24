@@ -233,15 +233,34 @@ CRITICAL: Respond with ONLY valid JSON matching this exact schema — no markdow
 
     @staticmethod
     def _extract_json_block(text: str) -> str:
-        """Strips markdown fences and extracts a clean JSON string."""
-        # Remove ```json ... ``` or ``` ... ``` wrappers if present
-        text = re.sub(r"```(?:json)?\s*", "", text).strip().rstrip("`").strip()
-        # Find first { ... } block
+        """
+        Strips markdown fences and extracts the first complete JSON object
+        using a balanced-brace walk (H-4).
+
+        Why not rfind('}')?  rfind finds the LAST '}' in the entire string,
+        which breaks whenever an LLM string value contains a '}' character or
+        when there is trailing text after the JSON object.  The balanced-brace
+        walk finds the exact closing brace that pairs with the opening '{'.
+        """
+        # M-6: strip both opening and closing fence variants in two passes
+        text = re.sub(r"```(?:json)?\s*", "", text)
+        text = re.sub(r"```", "", text).strip()
+
         start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return text[start: end + 1]
-        return text
+        if start == -1:
+            return text  # no JSON object; caller will handle json.loads error
+
+        depth = 0
+        for i, ch in enumerate(text[start:], start):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : i + 1]
+
+        # Unbalanced braces — return best-effort slice so caller can try json.loads
+        return text[start:]
 
     def _parse_llm_response(
         self,

@@ -120,14 +120,16 @@ def parse_and_score(self, job_id: str, file_bytes: bytes, filename: str) -> dict
         len(top_candidates),
     )
 
+    # M-5: lower-case once so mixed-case extensions (.JSON, .PDF) are labelled correctly
+    _fname_lower = filename.lower()
     source = "unknown"
-    if filename.endswith(".jsonl.gz"):
+    if _fname_lower.endswith(".jsonl.gz"):
         source = "jsonl.gz"
-    elif filename.endswith(".json"):
+    elif _fname_lower.endswith(".json"):
         source = "json"
-    elif filename.endswith(".pdf"):
+    elif _fname_lower.endswith(".pdf"):
         source = "pdf"
-    elif filename.endswith(".docx"):
+    elif _fname_lower.endswith(".docx"):
         source = "docx"
 
     return {
@@ -250,8 +252,10 @@ def write_output(self, xai_result: dict[str, Any]) -> dict[str, Any]:
 
     # ── Write submission.csv (sync — no event loop needed) ──
     try:
-        output_path = os.path.join("submission", "submission.csv")
-        os.makedirs("submission", exist_ok=True)
+        # L-3: use _SUBMISSION_DIR constant so path resolves correctly regardless
+        # of the Celery worker's current working directory (e.g. / inside Docker)
+        output_path = os.path.join(_SUBMISSION_DIR, "submission.csv")
+        os.makedirs(_SUBMISSION_DIR, exist_ok=True)
         with open(output_path, "w", newline="") as f:
             writer = csv.DictWriter(f,
                 fieldnames=["candidate_id","rank","score","reasoning"])

@@ -4,7 +4,7 @@ backend/tests/conftest.py
 Shared pytest fixtures for all TalentMatch AI test modules.
 
 Provides:
-  - sample_candidates  : 20 synthetic candidate dicts (session-scoped)
+  - sample_candidates  : 28 synthetic candidate dicts (session-scoped)
   - scored_candidates  : ranked output of score_all() on sample_candidates
   - client             : FastAPI TestClient (session-scoped)
 """
