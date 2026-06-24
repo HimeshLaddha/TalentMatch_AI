@@ -17,7 +17,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import sys
 import os
 
-# 🟢 DYNAMIC RESOLUTION: Calculate project root location relative to this file
+#DYNAMIC RESOLUTION: Calculate project root location relative to this file
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(CURRENT_DIR)  # Steps out of backend/ to project root
 
@@ -111,6 +111,34 @@ CURRENT_YEAR = 2026
 
 _seen_identity_keys: set[str] = set()
 
+# ---------------------------------------------------------------------------
+# Pre-compiled regex cache — avoids re-compiling word-boundary patterns
+# for every keyword on every candidate in the 100k scoring loop.
+# ---------------------------------------------------------------------------
+
+# Compiled once: standalone \bcto\b check used in has_engineering_title()
+_CTO_RE = re.compile(r'\bcto\b', re.IGNORECASE)
+
+# Pre-compiled seniority word-boundary patterns (6 words, compiled once at import)
+_SENIORITY_PATTERNS: dict[str, re.Pattern] = {
+    word: re.compile(rf'\b{re.escape(word)}\b', re.IGNORECASE)
+    for word in ("principal", "staff", "distinguished", "fellow", "vp", "director")
+}
+
+# Per-run keyword → Pattern cache for the scoring group keywords.
+# Populated on first encounter; cleared at the start of each score_all() call
+# to prevent unbounded growth across multiple pipeline runs.
+_WORD_BOUNDARY_CACHE: dict[str, re.Pattern] = {}
+
+
+def _get_keyword_pattern(kw: str) -> re.Pattern:
+    """Return a cached \\b…\\b pattern for kw, compiling it on first access."""
+    pat = _WORD_BOUNDARY_CACHE.get(kw)
+    if pat is None:
+        pat = re.compile(rf'\b{re.escape(kw)}\b', re.IGNORECASE)
+        _WORD_BOUNDARY_CACHE[kw] = pat
+    return pat
+
 def has_engineering_title(profile: dict) -> bool:
     # Handles nested or flat profile schemas
     sub_prof = profile.get("profile", {}) if "profile" in profile else profile
@@ -134,7 +162,7 @@ def has_engineering_title(profile: dict) -> bool:
         if not t:
             continue
         # lowercase containment check with boundary check for "cto" to prevent substring bugs like in "sales director"
-        if any((tok in t if tok != "cto" else re.search(r'\bcto\b', t)) for tok in tech_tokens):
+        if any((tok in t if tok != "cto" else _CTO_RE.search(t)) for tok in tech_tokens):
             return True
     return False
 
@@ -153,7 +181,7 @@ def credential_inflation_multiplier(profile: dict) -> float:
         yoe = 0.0
     
     for word, floor in SENIORITY_FLOOR.items():
-        if re.search(rf"\b{re.escape(word)}\b", current_title, re.IGNORECASE):
+        if _SENIORITY_PATTERNS[word].search(current_title):
             if yoe < floor:
                 return 0.45
     return 1.0
@@ -570,7 +598,7 @@ def compute_candidate_score(cand: dict) -> tuple[float, dict, str, dict]:
             if any(kw in s for s in skills_lowercase):
                 matched = True
                 break
-            if re.search(rf"\b{re.escape(kw)}\b", text_pool):
+            if _get_keyword_pattern(kw).search(text_pool):
                 matched = True
                 break
         group_matches[gname] = matched
@@ -725,8 +753,16 @@ def score_all(gz_path: str = "", *, candidates: list[dict] | None = None, return
 
     This is the single source of truth for heuristic scoring — imported by
     tasks/pipeline.py to avoid any logic duplication.
+
+    NOTE (FIX 3 observation): compute_candidate_score() writes four private
+    fields (_title_multiplier, _duplicate_multiplier, _cred_multiplier,
+    _behavior_multiplier) directly onto the incoming cand dict as a side-effect.
+    This is intentional for diagnostic purposes and does NOT affect scoring.
     """
+    # clear per-run caches so memory doesn't grow across multiple runs
     _seen_identity_keys.clear()
+    _WORD_BOUNDARY_CACHE.clear()
+
     loaded: list[dict]
 
     if candidates is not None:
@@ -774,58 +810,48 @@ def score_all(gz_path: str = "", *, candidates: list[dict] | None = None, return
 
         logger.info(f"score_all: loaded {len(loaded)} candidate profiles from disk.")
 
-    scored: list[dict] = []
+    # -------------------------------------------------------------------------
+    # FIX 2: Phase 1 — score all candidates; store only a compact tuple.
+    # Avoids building full profile dicts (with career_history / skills) for
+    # all N candidates.  Full enrichment happens only for the top-100 below.
+    # Tuple layout: (score, candidate_id, sub_scores, reasoning, xai, raw_cand)
+    # -------------------------------------------------------------------------
+    scored_tuples: list[tuple] = []
     for cand in loaded:
         cid = cand.get("candidate_id") or "CAND_0000000"
         score, sub_scores, reasoning, xai = compute_candidate_score(cand)
-        profile = cand.get("profile", {}) or {}
-        yoe = float(profile.get("years_of_experience") or 0.0)
-        current_title = profile.get("current_title", "")
-        name = profile.get("name") or profile.get("anonymized_name") or cand.get("name") or ""
-        email = profile.get("email") or cand.get("email") or ""
-        skills = cand.get("skills") or []
-        career_history = cand.get("career_history") or []
-        redrob_signals = cand.get("redrob_signals") or {}
-        
-        scored.append({
-            "candidate_id": cid,
-            "score": score,
-            "sub_scores": sub_scores,
-            "reasoning": reasoning,
-            "xai": xai,
-            "years_of_experience": int(round(yoe)) if yoe is not None else 0,
-            "current_title": current_title,
-            "name": name,
-            "email": email,
-            "skills": skills,
-            "career_history": career_history,
-            "redrob_signals": redrob_signals,
-            "_title_multiplier": cand.get("_title_multiplier", 1.0),
-            "_duplicate_multiplier": cand.get("_duplicate_multiplier", 1.0),
-            "_cred_multiplier": cand.get("_cred_multiplier", 1.0),
-            "_behavior_multiplier": cand.get("_behavior_multiplier", 1.0),
-        })
+        scored_tuples.append((score, cid, sub_scores, reasoning, xai, cand))
 
-    # Save intermediate components of ALL scored candidates to job_dir/scores.json
+    # -------------------------------------------------------------------------
+    # Phase 2 — sort once (score desc, candidate_id asc for ties),
+    # then slice.  Identical ordering to the original sort.
+    # -------------------------------------------------------------------------
+    scored_tuples.sort(key=lambda x: (-x[0], x[1]))
+    top_tuples = scored_tuples[:100]
+
+    # -------------------------------------------------------------------------
+    # Save intermediate components to job_dir/scores.json (ALL candidates)
+    # -------------------------------------------------------------------------
     job_dir = os.path.dirname(gz_path) if gz_path else ""
     if job_dir and os.path.exists(job_dir):
         scores_file = os.path.join(job_dir, "scores.json")
         try:
             lightweight_scores = []
-            for item in scored:
+            for sc, cid_s, ss, _r, _x, cand_s in scored_tuples:
+                profile_s = cand_s.get("profile", {}) or {}
                 lightweight_scores.append({
-                    "candidate_id": item["candidate_id"],
-                    "role_fit": item["sub_scores"]["role_fit"],
-                    "trajectory": item["sub_scores"]["trajectory"],
-                    "platform_signals": item["sub_scores"]["platform_signals"],
-                    "domain_alignment": item["sub_scores"].get("domain_alignment", 0.5),
-                    "title_multiplier": item["_title_multiplier"],
-                    "duplicate_multiplier": item["_duplicate_multiplier"],
-                    "cred_multiplier": item["_cred_multiplier"],
-                    "behavior_multiplier": item["_behavior_multiplier"],
-                    "years_of_experience": item["years_of_experience"],
-                    "current_title": item["current_title"],
-                    "xai": item["xai"]
+                    "candidate_id": cid_s,
+                    "role_fit": ss["role_fit"],
+                    "trajectory": ss["trajectory"],
+                    "platform_signals": ss["platform_signals"],
+                    "domain_alignment": ss.get("domain_alignment", 0.5),
+                    "title_multiplier": cand_s.get("_title_multiplier", 1.0),
+                    "duplicate_multiplier": cand_s.get("_duplicate_multiplier", 1.0),
+                    "cred_multiplier": cand_s.get("_cred_multiplier", 1.0),
+                    "behavior_multiplier": cand_s.get("_behavior_multiplier", 1.0),
+                    "years_of_experience": int(round(float(profile_s.get("years_of_experience") or 0.0))),
+                    "current_title": profile_s.get("current_title", ""),
+                    "xai": _x,
                 })
             with open(scores_file, "w", encoding="utf-8") as fh:
                 json.dump(lightweight_scores, fh)
@@ -833,13 +859,58 @@ def score_all(gz_path: str = "", *, candidates: list[dict] | None = None, return
         except Exception as exc:
             logger.error("Failed to write intermediate scores to %s: %s", scores_file, exc)
 
-    scored.sort(key=lambda x: (-x["score"], x["candidate_id"]))
-    top_100 = scored[:100]
-    for rank, cand in enumerate(top_100, 1):
-        cand["rank"] = rank
+    # -------------------------------------------------------------------------
+    # Phase 3 — enrich only the top-100 with full profile dicts.
+    # -------------------------------------------------------------------------
+    top_100: list[dict] = []
+    for rank, (score, cid, sub_scores, reasoning, xai, cand) in enumerate(top_tuples, 1):
+        profile = cand.get("profile", {}) or {}
+        yoe = float(profile.get("years_of_experience") or 0.0)
+        top_100.append({
+            "candidate_id": cid,
+            "rank": rank,
+            "score": score,
+            "sub_scores": sub_scores,
+            "reasoning": reasoning,
+            "xai": xai,
+            "years_of_experience": int(round(yoe)) if yoe is not None else 0,
+            "current_title": profile.get("current_title", ""),
+            "name": profile.get("name") or profile.get("anonymized_name") or cand.get("name") or "",
+            "email": profile.get("email") or cand.get("email") or "",
+            "skills": cand.get("skills") or [],
+            "career_history": cand.get("career_history") or [],
+            "redrob_signals": cand.get("redrob_signals") or {},
+            "_title_multiplier": cand.get("_title_multiplier", 1.0),
+            "_duplicate_multiplier": cand.get("_duplicate_multiplier", 1.0),
+            "_cred_multiplier": cand.get("_cred_multiplier", 1.0),
+            "_behavior_multiplier": cand.get("_behavior_multiplier", 1.0),
+        })
 
     if return_all:
-        return top_100, scored
+        # Build full scored list for callers that need all candidates
+        all_scored: list[dict] = []
+        for sc, cid, sub_scores, reasoning, xai, cand in scored_tuples:
+            profile = cand.get("profile", {}) or {}
+            yoe = float(profile.get("years_of_experience") or 0.0)
+            all_scored.append({
+                "candidate_id": cid,
+                "score": sc,
+                "sub_scores": sub_scores,
+                "reasoning": reasoning,
+                "xai": xai,
+                "years_of_experience": int(round(yoe)) if yoe is not None else 0,
+                "current_title": profile.get("current_title", ""),
+                "name": profile.get("name") or profile.get("anonymized_name") or cand.get("name") or "",
+                "email": profile.get("email") or cand.get("email") or "",
+                "skills": cand.get("skills") or [],
+                "career_history": cand.get("career_history") or [],
+                "redrob_signals": cand.get("redrob_signals") or {},
+                "_title_multiplier": cand.get("_title_multiplier", 1.0),
+                "_duplicate_multiplier": cand.get("_duplicate_multiplier", 1.0),
+                "_cred_multiplier": cand.get("_cred_multiplier", 1.0),
+                "_behavior_multiplier": cand.get("_behavior_multiplier", 1.0),
+            })
+        return top_100, all_scored
     return top_100
 
 

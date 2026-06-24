@@ -41,6 +41,7 @@ async def _upsert_candidates(
         await collection.create_index("candidate_id", unique=True)
         await collection.create_index("last_score")
         await collection.create_index("current_title")
+        await collection.create_index("last_run_id")
         
         operations = []
         
