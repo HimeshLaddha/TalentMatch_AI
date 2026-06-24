@@ -7,6 +7,10 @@ from app.core.config import settings
 router = APIRouter()
 
 # ── same tokeniser already in extract_challenge.py ──
+# L-2 advisory: this module keeps its own copies of tokenise_jd / jd_relevance_score
+# because the admin.py version uses an F1-style harmonic mean formula, while
+# extract_challenge.py uses a simpler Jaccard-style ratio. If the scoring
+# semantics are ever unified, consolidate here and import from extract_challenge.
 STOPWORDS = {
     "a","an","the","and","or","with","for","to","of","in","is",
     "are","be","as","at","by","from","on","we","you","our","your",

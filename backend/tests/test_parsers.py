@@ -194,3 +194,82 @@ def test_json_batch_unique_ids_when_none_provided():
 
     ids = [c["candidate_id"] for c in result]
     assert len(set(ids)) == 5, f"Expected 5 unique ids, got: {ids}"
+
+
+# ── NEW TESTS (Issues 1–3, 6) ─────────────────────────────────────────────────
+
+def test_normalize_preserves_zero_last_used_year():
+    """last_used_year=0 must not be dropped by falsy `or` check."""
+    from parsers.extractors import json_parser
+    import json
+
+    candidate = {
+        "name": "Test", "current_title": "ML Engineer",
+        "years_of_experience": 5,
+        "skills": [{"name": "Python", "last_used_year": 0}],
+        "career_history": [],
+    }
+    result = json_parser(json.dumps(candidate).encode())[0]
+    skill = next(s for s in result["skills"] if s["name"] == "Python")
+    assert skill.get("last_used_year") == 0, \
+        "last_used_year=0 must be preserved, not treated as missing"
+
+
+def test_format_router_case_insensitive():
+    """Uppercase extensions must route correctly."""
+    from parsers.format_router import route_file
+    import json
+
+    # Valid minimal JSON with uppercase extension
+    payload = json.dumps([{
+        "candidate_id": "TEST_001",
+        "name": "Test", "current_title": "Engineer",
+        "years_of_experience": 5,
+        "skills": [], "career_history": [],
+    }]).encode()
+
+    result = route_file(payload, "candidates.JSON")
+    assert len(result) == 1
+
+    result2 = route_file(payload, "CANDIDATES.Json")
+    assert len(result2) == 1
+
+
+def test_jsonlgz_parser_streams_large_file():
+    """
+    Creates a synthetic 500-row .jsonl.gz in memory and
+    verifies jsonlgz_parser returns all 500 candidates
+    without error.
+    """
+    import gzip, io, json
+    from parsers.extractors import jsonlgz_parser
+
+    rows = [{"candidate_id": f"TEST_{i:04d}", "name": f"Person {i}",
+             "current_title": "ML Engineer", "years_of_experience": 6,
+             "skills": [], "career_history": []} for i in range(500)]
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode='wb') as gz:
+        for row in rows:
+            gz.write((json.dumps(row) + "\n").encode())
+    result = jsonlgz_parser(buf.getvalue())
+    assert len(result) == 500
+
+
+def test_extract_json_object_handles_prose():
+    """_extract_json_object must find JSON even when surrounded by extra text."""
+    from parsers.extractors import _extract_json_object
+
+    messy = 'Here is the result: {"name": "Alice", "yoe": 5} Thanks!'
+    obj = _extract_json_object(messy)
+    assert obj["name"] == "Alice"
+    assert obj["yoe"] == 5
+
+
+def test_route_file_rejects_unsupported_format():
+    """route_file must raise ValueError for unsupported extensions."""
+    from parsers.format_router import route_file
+    import pytest
+
+    with pytest.raises(ValueError, match="Unsupported file type"):
+        route_file(b"random bytes", "data.xlsx")
+
