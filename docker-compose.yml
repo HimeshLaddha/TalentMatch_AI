@@ -103,7 +103,10 @@ services:
   # ---------------------------------------------------------------------------
   celery_worker:
     build: ./backend
-    command: celery -A tasks.pipeline worker --loglevel=info --concurrency=4
+    command: >
+      celery -A tasks.pipeline worker
+      --loglevel=info
+      --concurrency=${CELERY_CONCURRENCY:-4}
     env_file: .env
     environment:
       - QDRANT_HOST=qdrant

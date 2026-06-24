@@ -264,7 +264,15 @@ def render_markdown_table(scored_records):
                 platform = f"{float(record.get('platform_signals_score', 0.0)):.4f}"
                 domain = f"{float(record.get('domain_alignment_score', 0.0)):.4f}"
                 summary = str(EDGE_CASE_SUMMARIES.get(cid, "N/A"))
-                
+
+                # FIX-3: Sanitize string fields — escape pipe chars and strip newlines
+                # so that LLM-extracted or free-text data cannot corrupt Markdown table rows
+                def _safe(s: str) -> str:
+                    return s.replace("|", "\\|").replace("\n", " ").replace("\r", "")
+
+                cid     = _safe(cid)
+                summary = _safe(summary)
+
                 row = (
                     f"| {rank:<4} | {cid:<15} | {final:<11} | {role_fit:<14} | "
                     f"{traj:<16} | {platform:<14} | {domain:<12} | {summary:<72} |"
