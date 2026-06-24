@@ -79,6 +79,7 @@ async def upload_candidates(
 
     # FIX-1: Sanitize filename — strip all path components to prevent path traversal
     safe_filename = os.path.basename(filename).strip()
+    _, ext = os.path.splitext(safe_filename)
     if (
         not safe_filename
         or safe_filename.startswith(".")
@@ -86,7 +87,7 @@ async def upload_candidates(
         or "/" in safe_filename
         or "\\" in safe_filename
     ):
-        safe_filename = f"upload_{uuid.uuid4().hex[:8]}.bin"
+        safe_filename = f"upload_{uuid.uuid4().hex[:8]}{ext}"
 
     job_id: str = str(uuid.uuid4())
 
@@ -116,7 +117,7 @@ async def upload_candidates(
 
     # Use the original filename for format detection (extension checks already done above);
     # use safe_filename only for any path construction inside the pipeline
-    async_result = submit_ranking_pipeline(job_id, file_bytes=contents, filename=filename)
+    async_result = submit_ranking_pipeline(job_id, file_bytes=contents, filename=safe_filename)
     task_id: str = async_result.id
 
     logger.info(
@@ -206,6 +207,34 @@ async def pipeline_status(task_id: str) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 # POST /api/v1/pipeline/rerank
 # ---------------------------------------------------------------------------
+def _process_reranking(candidates: list[dict], jd_tokens: set[str]) -> list[dict]:
+    from extract_challenge import jd_relevance_score, call_llm_xai
+    for c in candidates:
+        jd_mult = jd_relevance_score(c, jd_tokens)
+        c["final_score"]    = round(c.get("last_score", 0) * jd_mult, 6)
+        c["jd_multiplier"]  = jd_mult
+        c["jd_match_pct"]   = round((jd_mult - 0.5) * 200)
+
+    # Sort: final_score desc, then candidate_id asc for ties
+    candidates.sort(key=lambda x: (-x["final_score"], x["candidate_id"]))
+
+    for i, c in enumerate(candidates):
+        c["rank"] = i + 1
+        # Enrich reasoning for top-3 dynamically
+        if c["rank"] <= 3:
+            if c.get("xai_narrative"):
+                c["reasoning"] = c["xai_narrative"]
+            elif c.get("xai"):
+                try:
+                    c_enriched = call_llm_xai([c])[0]
+                    c["reasoning"] = c_enriched.get("xai_narrative") or c.get("reasoning")
+                except Exception as err:
+                    logger.warning(f"Failed to generate dynamic XAI narrative: {err}")
+                    c["reasoning"] = c.get("reasoning") or "Heuristic reasoning generation failed."
+            else:
+                c["reasoning"] = c.get("reasoning") or "Heuristic reasoning not generated yet."
+    return candidates
+
 class JDRerankRequest(BaseModel):
     job_id: str
     jd_text: str = ""
@@ -217,7 +246,7 @@ async def rerank_by_jd(payload: JDRerankRequest, db=Depends(get_mongo_db)):
     If jd_text is empty, order is identical to original heuristic rank.
     Returns top 100.
     """
-    from extract_challenge import tokenise_jd, jd_relevance_score
+    from extract_challenge import tokenise_jd
     jd_tokens = tokenise_jd(payload.jd_text)
 
     cursor = db["candidates"].find(
@@ -268,31 +297,7 @@ async def rerank_by_jd(payload: JDRerankRequest, db=Depends(get_mongo_db)):
                 c["last_score"] = rc.get("score", c.get("last_score", 0.0))
                 candidates.append(c)
 
-    for c in candidates:
-        jd_mult = jd_relevance_score(c, jd_tokens)
-        c["final_score"]    = round(c.get("last_score", 0) * jd_mult, 6)
-        c["jd_multiplier"]  = jd_mult
-        c["jd_match_pct"]   = round((jd_mult - 0.5) * 200)
-
-    # Sort: final_score desc, then candidate_id asc for ties
-    candidates.sort(key=lambda x: (-x["final_score"], x["candidate_id"]))
-
-    for i, c in enumerate(candidates):
-        c["rank"] = i + 1
-        # Enrich reasoning for top-3 dynamically
-        if c["rank"] <= 3:
-            if c.get("xai_narrative"):
-                c["reasoning"] = c["xai_narrative"]
-            elif c.get("xai"):
-                try:
-                    from extract_challenge import call_llm_xai
-                    c_enriched = call_llm_xai([c])[0]
-                    c["reasoning"] = c_enriched.get("xai_narrative") or c.get("reasoning")
-                except Exception as err:
-                    logger.warning(f"Failed to generate dynamic XAI narrative: {err}")
-                    c["reasoning"] = c.get("reasoning") or "Heuristic reasoning generation failed."
-            else:
-                c["reasoning"] = c.get("reasoning") or "Heuristic reasoning not generated yet."
+    candidates = await asyncio.to_thread(_process_reranking, candidates, jd_tokens)
 
     return {
         "job_id":          payload.job_id,

@@ -246,3 +246,33 @@ def test_admin_analyze_matches_correctly(mock_get_mongo_db: MagicMock, client: T
     assert data["candidates"][0]["rank"] == 1
     assert data["candidates"][0]["jd_match_pct"] > 50
 
+
+@patch("app.api.v1.endpoints.results.get_db")
+def test_get_results_by_job_id(mock_get_db: MagicMock, client: TestClient) -> None:
+    """
+    GET /api/v1/results/{job_id} must return results document if it exists.
+    """
+    mock_doc = {
+        "job_id": "test-job-id-999",
+        "run_at": "2026-06-24T14:31:55Z",
+        "total_scored": 10,
+        "candidates": [],
+        "_id": "some-object-id"
+    }
+
+    mock_db = MagicMock()
+    # Mock find_one to return the mock_doc
+    mock_db.rankings.find_one = MagicMock()
+    async def fake_find_one(query):
+        return mock_doc
+    mock_db.rankings.find_one.side_effect = fake_find_one
+    mock_get_db.return_value = mock_db
+
+    response = client.get("/api/v1/results/test-job-id-999")
+    assert response.status_code == 200, f"Expected 200, got: {response.text}"
+    
+    data = response.json()
+    assert data["job_id"] == "test-job-id-999"
+    assert "_id" not in data, "MongoDB '_id' field must be removed from returned JSON payload"
+
+

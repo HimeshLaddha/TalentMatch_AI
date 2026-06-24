@@ -99,7 +99,7 @@ async def get_results(job_id: str):
     Reads from MongoDB collection "rankings" where job_id matches.
     If not found: return 404.
     """
-    db = get_mongo_db()
+    db = get_db()
     doc = await db.rankings.find_one({"job_id": job_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Job results not found")
