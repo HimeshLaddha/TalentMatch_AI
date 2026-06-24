@@ -30,6 +30,8 @@ def make_celery() -> Celery:
         task_store_eager_result=False,  # EXPLICIT
         result_expires=3600,            # results expire after 1 hour
         broker_connection_retry_on_startup=True,
+        task_time_limit=600,            # hard time limit in seconds
+        task_soft_time_limit=550,       # soft time limit in seconds
     )
     return app
 

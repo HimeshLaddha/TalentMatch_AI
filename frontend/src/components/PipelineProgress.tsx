@@ -66,9 +66,13 @@ export default function PipelineProgress({ jobId, taskId, onComplete }: Pipeline
 
     eventSource.onerror = (err) => {
       console.error("SSE Connection error", err);
-      eventSource.close();
-      setStatusState("FAILURE");
-      setErrorMsg("Failed to connect to status stream.");
+      if (eventSource.readyState === EventSource.CLOSED) {
+        eventSource.close();
+        setStatusState("FAILURE");
+        setErrorMsg("Failed to connect to status stream.");
+      } else {
+        setDetail("Reconnecting to pipeline status...");
+      }
     };
 
     return () => {

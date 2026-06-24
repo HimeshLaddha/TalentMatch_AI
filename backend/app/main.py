@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
@@ -11,12 +12,16 @@ app = FastAPI(title="TalentMatch AI API", version="0.1.0")
 # Explicit origins let both credential headers (Authorization) and
 # cross-origin requests work correctly.
 # ---------------------------------------------------------------------------
-_ALLOWED_ORIGINS = [
-    "http://localhost:3000",   # Next.js dev server
-    "http://127.0.0.1:3000",
-    "http://localhost:8000",   # direct Swagger / health checks
-    "http://127.0.0.1:8000",
-]
+_env_origins = os.getenv("ALLOWED_ORIGINS")
+if _env_origins:
+    _ALLOWED_ORIGINS = [o.strip() for o in _env_origins.split(",") if o.strip()]
+else:
+    _ALLOWED_ORIGINS = [
+        "http://localhost:3000",   # Next.js dev server
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",   # direct Swagger / health checks
+        "http://127.0.0.1:8000",
+    ]
 
 app.add_middleware(
     CORSMiddleware,
