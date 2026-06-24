@@ -224,7 +224,8 @@ async def rerank_by_jd(payload: JDRerankRequest, db=Depends(get_mongo_db)):
         {"last_run_id": payload.job_id},
         {"_id": 0, "candidate_id": 1, "current_title": 1,
          "years_of_experience": 1, "last_score": 1,
-         "skills": 1, "career_history": 1}
+         "skills": 1, "career_history": 1, "xai": 1,
+         "xai_narrative": 1, "reasoning": 1}
     )
     candidates = await cursor.to_list(length=100000)
 
@@ -242,7 +243,8 @@ async def rerank_by_jd(payload: JDRerankRequest, db=Depends(get_mongo_db)):
                 {"candidate_id": {"$in": candidate_ids}},
                 {"_id": 0, "candidate_id": 1, "current_title": 1,
                  "years_of_experience": 1, "last_score": 1,
-                 "skills": 1, "career_history": 1}
+                 "skills": 1, "career_history": 1, "xai": 1,
+                 "xai_narrative": 1, "reasoning": 1}
             )
             fetched_candidates = await cursor.to_list(length=100000)
             fetched_map = {c["candidate_id"]: c for c in fetched_candidates}
@@ -277,6 +279,20 @@ async def rerank_by_jd(payload: JDRerankRequest, db=Depends(get_mongo_db)):
 
     for i, c in enumerate(candidates):
         c["rank"] = i + 1
+        # Enrich reasoning for top-3 dynamically
+        if c["rank"] <= 3:
+            if c.get("xai_narrative"):
+                c["reasoning"] = c["xai_narrative"]
+            elif c.get("xai"):
+                try:
+                    from extract_challenge import call_llm_xai
+                    c_enriched = call_llm_xai([c])[0]
+                    c["reasoning"] = c_enriched.get("xai_narrative") or c.get("reasoning")
+                except Exception as err:
+                    logger.warning(f"Failed to generate dynamic XAI narrative: {err}")
+                    c["reasoning"] = c.get("reasoning") or "Heuristic reasoning generation failed."
+            else:
+                c["reasoning"] = c.get("reasoning") or "Heuristic reasoning not generated yet."
 
     return {
         "job_id":          payload.job_id,

@@ -889,11 +889,12 @@ def score_all(gz_path: str = "", *, candidates: list[dict] | None = None, return
     if return_all:
         # Build full scored list for callers that need all candidates
         all_scored: list[dict] = []
-        for sc, cid, sub_scores, reasoning, xai, cand in scored_tuples:
+        for rank, (sc, cid, sub_scores, reasoning, xai, cand) in enumerate(scored_tuples, 1):
             profile = cand.get("profile", {}) or {}
             yoe = float(profile.get("years_of_experience") or 0.0)
             all_scored.append({
                 "candidate_id": cid,
+                "rank": rank,
                 "score": sc,
                 "sub_scores": sub_scores,
                 "reasoning": reasoning,

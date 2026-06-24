@@ -27,6 +27,8 @@ async def get_latest_results(
                 "reasoning": 1,
                 "skills": 1,
                 "career_history": 1,
+                "xai": 1,
+                "xai_narrative": 1,
             }
         ).sort("last_score", -1).limit(top_n)
 
@@ -47,9 +49,28 @@ async def get_latest_results(
         for i, c in enumerate(candidates):
             c["rank"] = i + 1
             c["score"] = c["last_score"]  # alias for frontend
-            # Use reasoning from rankings if candidate doc lacks it
-            if not c.get("reasoning") and c["candidate_id"] in reasoning_map:
-                c["reasoning"] = reasoning_map[c["candidate_id"]]
+            
+            # Use/format XAI reasoning for top-3
+            if c["rank"] <= 3:
+                if c.get("xai_narrative"):
+                    c["reasoning"] = c["xai_narrative"]
+                elif c.get("xai"):
+                    try:
+                        from extract_challenge import call_llm_xai
+                        c_enriched = call_llm_xai([c])[0]
+                        c["reasoning"] = c_enriched.get("xai_narrative") or c.get("reasoning")
+                    except Exception as err:
+                        import logging
+                        logging.getLogger(__name__).warning(f"Failed to generate dynamic XAI narrative: {err}")
+                        c["reasoning"] = c.get("reasoning") or "Heuristic reasoning generation failed."
+                elif c["candidate_id"] in reasoning_map and reasoning_map[c["candidate_id"]]:
+                    r_text = reasoning_map[c["candidate_id"]]
+                    if r_text.startswith("**Rank #") or "- Strongest Alignment:" in r_text:
+                        c["reasoning"] = r_text
+                    else:
+                        c["reasoning"] = c.get("reasoning") or r_text
+                else:
+                    c["reasoning"] = c.get("reasoning") or "Heuristic reasoning not generated yet."
 
         total = await db["candidates"].count_documents({"last_score": {"$gt": 0}})
 

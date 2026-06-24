@@ -64,6 +64,9 @@ async def _upsert_candidates(
                             "last_run_id": job_id,
                             "last_seen": run_at,
                             "upload_source": source,
+                            "reasoning": c.get("reasoning", ""),
+                            "xai": c.get("xai", {}),
+                            "xai_narrative": c.get("xai_narrative", ""),
                         },
                         "$push": {
                             "run_history": {

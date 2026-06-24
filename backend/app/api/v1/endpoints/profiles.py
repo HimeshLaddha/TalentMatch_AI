@@ -120,8 +120,10 @@ async def login_admin(payload: LoginRequest):
     """
     Validates the administrative password and returns a signed JWT token on success.
     """
-    # M-1: reject requests immediately if ADMIN_PASSWORD is not configured
-    admin_password = os.getenv("ADMIN_PASSWORD", "")
+    # M-1: reject requests immediately if ADMIN_PASSWORD is not configured.
+    # Read from settings (pydantic-settings populates this from .env at startup)
+    # rather than os.getenv() which returns empty if load_dotenv() was never called.
+    admin_password = settings.ADMIN_PASSWORD
     if not admin_password:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
