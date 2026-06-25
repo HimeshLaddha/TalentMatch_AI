@@ -975,7 +975,7 @@ async def run_pipeline():
     # Ingestion + Scoring — delegate to score_all() to avoid logic duplication
     # ---------------------------------------------------------------------------
     try:
-        top_100, all_candidates = score_all(CANDIDATES_GZ, return_all=True)
+        top_100, all_candidates = score_all(gz_path=CANDIDATES_GZ, return_all=True)
     except FileNotFoundError:
         logger.critical("No candidate datasets were found inside the official challenge directory.")
         sys.exit(1)
