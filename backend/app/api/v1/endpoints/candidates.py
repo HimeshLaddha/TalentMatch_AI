@@ -68,13 +68,7 @@ async def list_candidates(
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning(f"MongoDB unavailable: {e}")
-        return {
-            "total": 0,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": 0,
-            "candidates": []
-        }
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable")
 
 @router.get("/{candidate_id}")
 async def get_candidate(candidate_id: str, db=Depends(get_mongo_db)):

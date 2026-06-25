@@ -84,13 +84,7 @@ async def get_latest_results(
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning(f"results/latest error: {e}")
-        return {
-            "job_id": "global",
-            "run_at": None,
-            "total_scored": 0,
-            "runtime_seconds": None,
-            "candidates": [],
-        }
+        raise HTTPException(status_code=503, detail="Database temporarily unavailable")
 
 @router.get("/{job_id}")
 async def get_results(job_id: str):

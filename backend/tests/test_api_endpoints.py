@@ -275,4 +275,25 @@ def test_get_results_by_job_id(mock_get_db: MagicMock, client: TestClient) -> No
     assert data["job_id"] == "test-job-id-999"
     assert "_id" not in data, "MongoDB '_id' field must be removed from returned JSON payload"
 
+def test_login_returns_correct_token_key(client: TestClient) -> None:
+    """
+    POST /api/v1/profiles/login returns the JWT token under keys expected by
+    both OAuth standards and the frontend.
+    """
+    import os
+    from unittest.mock import patch
+    with patch.dict(os.environ, {"ADMIN_PASSWORD": "test_admin_secret"}):
+        res = client.post(
+            "/api/v1/profiles/login",
+            json={"password": "test_admin_secret"}
+        )
+        assert res.status_code == 200
+        data = res.json()
+        # Assert the key that frontend actually uses
+        assert "token" in data or "access_token" in data, \
+            "Login response must contain token or access_token"
+        # Assert the value is a non-empty string
+        token_val = data.get("access_token") or data.get("token")
+        assert token_val and len(token_val) > 20
+
 
