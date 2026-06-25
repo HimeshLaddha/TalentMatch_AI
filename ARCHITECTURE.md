@@ -208,11 +208,11 @@ The format router handles compressed archives, structured tables, and raw docume
 | Test File | Tests | Covers |
 |---|---|---|
 | `test_scoring_invariants.py` | 9 | Score monotonicity, zero honeypot rate, keyword stuffing, experience envelope, duplicates, CTO regex, seniority floors, skill recency decay, fuzzy identity hashing |
-| `test_api_endpoints.py` | 5 | Immediate queuing, auth validation, status SSE stream, candidate list route checks, admin JD analysis matches |
-| `test_parsers.py` | 7 | Format routing paths, JSON array batch loading, single JSON file mapping, unique UPLOAD ID generation, PDF/DOCX mock text extractions |
+| `test_api_endpoints.py` | 7 | Immediate queuing, auth validation, status SSE stream, candidate list route checks, admin JD analysis matches, login token keys compliance |
+| `test_parsers.py` | 12 | Format routing paths, JSON array batch loading, single JSON file mapping, unique UPLOAD ID generation, PDF/DOCX mock text extractions |
 | `test_profiles_auth_cache.py` | 9 | JWT role validation, secure endpoints, client caching hashes, login credentials |
 | `test_services.py` | 2 | MongoDB Motor driver database queries and candidate profile status helper |
-| **Total** | **32** | **Full code integration and schema compliance** |
+| **Total** | **39** | **Full code integration and schema compliance** |
 
 ---
 
