@@ -291,7 +291,7 @@ def write_output(self, xai_result: dict[str, Any]) -> dict[str, Any]:
                         {
                             "candidate_id": c["candidate_id"],
                             "rank":         c.get("rank", 9999),
-                            "score":        c.get("score") or c.get("last_score") or 0.0,
+                            "score": (lambda s: s if s is not None else (c.get("last_score") if c.get("last_score") is not None else 0.0))(c.get("score")),
                             "reasoning":    c.get("reasoning", ""),
                             "current_title": c.get("current_title", ""),
                             "years_of_experience": c.get("years_of_experience", 0),
